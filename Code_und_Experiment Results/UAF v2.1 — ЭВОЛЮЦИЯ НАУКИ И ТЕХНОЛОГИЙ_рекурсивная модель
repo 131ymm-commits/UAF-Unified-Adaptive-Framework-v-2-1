@@ -1,0 +1,672 @@
+# -*- coding: utf-8 -*-
+"""
+UAF v2.1 — ЭВОЛЮЦИЯ НАУКИ И ТЕХНОЛОГИЙ
+Рекурсивная модель: наука изучает саму адаптацию
+Colab-ready: numpy, matplotlib, dataclasses, typing
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import matplotlib.patches as mpatches
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple, Optional
+import random
+
+np.random.seed(42)
+random.seed(42)
+
+# ══════════════════════════════════════════════════════════════════════
+# STYLE
+# ══════════════════════════════════════════════════════════════════════
+DARK   = '#0a0e14'
+PANEL  = '#141922'
+GRID   = '#252a33'
+TXT    = '#c8ccd4'
+DIM    = '#6b7280'
+
+plt.rcParams.update({
+    'figure.facecolor': DARK, 'axes.facecolor': PANEL,
+    'axes.edgecolor': GRID, 'axes.labelcolor': TXT,
+    'text.color': TXT, 'xtick.color': DIM, 'ytick.color': DIM,
+    'grid.color': GRID, 'legend.facecolor': PANEL,
+    'legend.edgecolor': '#444', 'font.family': 'monospace',
+    'font.size': 9,
+})
+
+# ══════════════════════════════════════════════════════════════════════
+# UAF CONSTANTS
+# ══════════════════════════════════════════════════════════════════════
+TP = {1: 0.22, 2: 0.47, 3: 0.70}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# KNOWLEDGE SECTOR — единый абстрактный контур для науки/техники
+# ══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class KnowledgeSector:
+    """
+    Сектор знаний (наука, техника, медицина и т.д.)
+    
+    S = Структура   — институты, оборудование, методы
+    C = Катализ     — скорость распространения идей
+    I = Информация  — накопленный объём знаний
+    
+    Ключевое отличие от культурной модели:
+    наука имеет ОСОЗНАННЫЙ компонент обратной связи —
+    она исследует собственные механизмы замыкания.
+    """
+    name:       str
+    birth:      int        # условный год «рождения»
+    color:      str
+    icon:       str = '●'
+    
+    # Базовые скорости роста
+    sg: float = 0.004
+    cg: float = 0.004
+    ig: float = 0.004
+    
+    # Состояние
+    S: float = 0.02
+    C: float = 0.02
+    I: float = 0.02
+    level: int = 0
+    alive: bool = False
+    
+    # Рекурсия: осознание собственных паттернов
+    meta_awareness: float = 0.0    # 0..1: насколько сектор изучает сам себя
+    self_acceleration: float = 0.0 # ускорение роста из-за рефлексии
+    
+    # Последователи / влияние
+    impact: float = 0.005
+    
+    # История
+    hist: Dict[str, List[float]] = field(default_factory=lambda: {
+        'cd': [], 'S': [], 'C': [], 'I': [],
+        'impact': [], 'level': [], 'meta': [], 'accel': [],
+    })
+
+    @property
+    def cd(self) -> float:
+        return float(np.clip((self.S * self.C * self.I) ** (1/3), 0, 1))
+
+    def check_level(self) -> bool:
+        old = self.level
+        c = self.cd
+        if c >= TP[3] and self.level < 3: self.level = 3
+        elif c >= TP[2] and self.level < 2: self.level = 2
+        elif c >= TP[1] and self.level < 1: self.level = 1
+        return self.level > old
+
+    def activate(self):
+        self.alive = True
+        self.S = 0.03 + random.uniform(0, 0.03)
+        self.C = 0.03 + random.uniform(0, 0.03)
+        self.I = 0.02 + random.uniform(0, 0.02)
+        self.impact = 0.005
+
+    def record(self):
+        self.hist['cd'].append(self.cd)
+        self.hist['S'].append(self.S)
+        self.hist['C'].append(self.C)
+        self.hist['I'].append(self.I)
+        self.hist['impact'].append(self.impact)
+        self.hist['level'].append(self.level)
+        self.hist['meta'].append(self.meta_awareness)
+        self.hist['accel'].append(self.self_acceleration)
+
+    def grow(self, age: int, noise_scale: float = 0.001):
+        """Логистический рост с учётом рекурсивного ускорения"""
+        gm = 1.0 / (1.0 + 6e-5 * age)
+        accel = 1.0 + self.self_acceleration  # рекурсивный буст
+        
+        for attr, rate in [('S', self.sg), ('C', self.cg), ('I', self.ig)]:
+            v  = getattr(self, attr)
+            dv = (rate * gm * accel + random.gauss(0, noise_scale)) * (1 - v * 0.20)
+            setattr(self, attr, float(np.clip(v + dv, 0.01, 1.0)))
+
+    def update_meta(self):
+        """
+        РЕКУРСИЯ: сектор «понимает» сам себя.
+        
+        meta_awareness растёт с CD и уровнем:
+        L1: сектор начинает рефлексию ( peer review, методология )
+        L2: сектор изучает собственные паттерны роста
+        L3: сектор моделирует собственное будущее и управляет им
+        
+        self_acceleration = f(meta_awareness):
+        осознание ускоряет замыкание — положительная обратная связь.
+        Но с затуханием: ретроспективное ускорение ограничено.
+        """
+        if not self.alive:
+            return
+        
+        # Рост осознанности
+        cd = self.cd
+        if self.level >= 2:
+            growth = 0.005 * cd
+        elif self.level >= 1:
+            growth = 0.002 * cd
+        else:
+            growth = 0.0005 * cd
+        
+        self.meta_awareness = float(np.clip(
+            self.meta_awareness + growth, 0, 1
+        ))
+        
+        # Ускорение: log-зависимость от осознанности (с насыщением)
+        self.self_acceleration = float(np.clip(
+            0.6 * np.log1p(3.0 * self.meta_awareness), 0, 1.5
+        ))
+
+
+# ══════════════════════════════════════════════════════════════════════
+# METADATA: взаимодействия между секторами
+# ══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class CrossFlow:
+    year:    int
+    donor:   str
+    recv:    str
+    flow:    float
+    label:   str = ""
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SIMULATION
+# ══════════════════════════════════════════════════════════════════════
+
+class ScienceTechUAF:
+    
+    T0, T1, DT = -500, 2060, 5
+    
+    def __init__(self):
+        self.years = list(range(self.T0, self.T1 + 1, self.DT))
+        self.sectors = self._init_sectors()
+        self.cross_flows: List[CrossFlow] = []
+        self.tp_events: List[Tuple] = []
+    
+    def _init_sectors(self) -> List[KnowledgeSector]:
+        """
+        Сектора знаний с историческими датами.
+        Каждый — отдельный AdaptiveLoop со своей S-C-I динамикой.
+        """
+        return [
+            # ── Классическая наука ──
+            KnowledgeSector(
+                "Натурфилософия", -500, "#888899", icon="🏛",
+                sg=0.0025, cg=0.0018, ig=0.0035,
+            ),
+            # ── Математика ──
+            KnowledgeSector(
+                "Математика", -300, "#FFD700", icon="∑",
+                sg=0.0040, cg=0.0035, ig=0.0065,
+            ),
+            # ── Механика + термодинамика ──
+            KnowledgeSector(
+                "Класс. физика", 1543, "#00AAFF", icon="⚙",
+                sg=0.0070, cg=0.0080, ig=0.0090,
+            ),
+            # ── Биология / медицина ──
+            KnowledgeSector(
+                "Биомедицина", 1590, "#44DD44", icon="🧬",
+                sg=0.0055, cg=0.0060, ig=0.0070,
+            ),
+            # ── Электричество / электроника ──
+            KnowledgeSector(
+                "Электроника", 1800, "#FF8800", icon="⚡",
+                sg=0.0080, cg=0.0090, ig=0.0100,
+            ),
+            # ── Информатика / кибернетика ──
+            KnowledgeSector(
+                "Информатика", 1936, "#00DDDD", icon="💻",
+                sg=0.0100, cg=0.0120, ig=0.0140,
+            ),
+            # ── Квантовая физика ──
+            KnowledgeSector(
+                "Квантовая физ.", 1900, "#CC44FF", icon="⚛",
+                sg=0.0085, cg=0.0075, ig=0.0110,
+            ),
+            # ── ИИ / machine learning ──
+            KnowledgeSector(
+                "ИИ", 1956, "#FF4466", icon="🤖",
+                sg=0.0120, cg=0.0150, ig=0.0180,
+            ),
+        ]
+    
+    # ── Исторические события ──────────────────────────────────────
+    
+    def _inject(self, s: KnowledgeSector, y: int):
+        n = s.name
+        
+        # ▸ Натурфилософия
+        if n == "Натурфилософия":
+            if -500 <= y <= -300: s.I += 0.004      # Сократ, Платон, Аристотель
+            if y == -300: s.S += 0.08               # Александрийская б-ка
+            if 200 <= y <= 600: s.C *= 0.995; s.S *= 0.996   # упадок
+            if 800 <= y <= 1200: s.I += 0.003       # исламский Ренессанс
+            if y == 1200: s.S += 0.05               # средневековые университеты
+            if 1450 <= y <= 1550: s.C += 0.04       # книгопечатание
+            if y > 1600: s.S *= 0.992; s.C *= 0.990  # поглощение новыми науками
+        
+        # ▸ Математика
+        if n == "Математика":
+            if -300 <= y <= -200: s.I += 0.06       # Евклид, Архимед
+            if 200 <= y <= 500: s.I += 0.004        # Диофант, Папп
+            if 800 <= y <= 1100: s.I += 0.005       # аль-Хорезми, аль-Каши
+            if 1500 <= y <= 1600: s.I += 0.006      # Виета, Кардано
+            if 1660: s.I += 0.07; s.C += 0.03       # Ньютон/Лейбниц
+            if 1820: s.I += 0.05                     # Гаусс, Галуа
+            if 1900 <= y <= 1930: s.I += 0.008      # Гильберт, Гёдель
+            if y > 1950: s.C += 0.006               # компьютерная алгебра
+        
+        # ▸ Классическая физика
+        if n == "Класс. физика":
+            if y == 1543: s.I += 0.08               # Коперник
+            if y == 1609: s.I += 0.06               # Кеплер
+            if y == 1687: s.I += 0.12; s.S += 0.05  # Ньютон: Principia
+            if y == 1750: s.I += 0.04; s.C += 0.03  # Эйлер, д'Аламбер
+            if y == 1865: s.I += 0.08; s.S += 0.03  # Максвелл
+            if y == 1895: s.I += 0.04               # Рентген, радио
+        
+        # ▸ Биомедицина
+        if n == "Биомедицина":
+            if y == 1543: s.I += 0.06               # Везалий
+            if y == 1590: s.I += 0.05               # Гук, микроскоп
+            if y == 1665: s.I += 0.04               # Гарвей, кровообращение
+            if y == 1859: s.I += 0.08; s.C += 0.04  # Дарвин
+            if y == 1867: s.I += 0.05               # Пастер, теория микробов
+            if y == 1928: s.I += 0.07               # Пенициллин
+            if y == 1953: s.I += 0.09; s.S += 0.04  # ДНК
+            if 1990 <= y <= 2010: s.I += 0.006; s.C += 0.004  # геномика
+            if y > 2015: s.I += 0.008               # CRISPR, mRNA
+        
+        # ▸ Электроника
+        if n == "Электроника":
+            if y == 1800: s.I += 0.06               # Гальвани, Вольта
+            if y == 1831: s.I += 0.05               # Фарадей
+            if y == 1879: s.I += 0.06; s.S += 0.04  # Эдисон: лампа
+            if y == 1895: s.I += 0.05               # Маркони: радио
+            if y == 1906: s.I += 0.07               # Флеминг: диод
+            if y == 1947: s.I += 0.10               # Транзистор
+            if y == 1958: s.I += 0.08; s.C += 0.05  # ИС (Килби/Нойс)
+            if y == 1971: s.I += 0.06               # Intel 4004
+            if 1990 <= y <= 2020: s.C += 0.008; s.I += 0.006  # Муур
+        
+        # ▸ Информатика
+        if n == "Информатика":
+            if y == 1936: s.I += 0.08               # Тьюринг: вычислимость
+            if y == 1945: s.I += 0.06; s.S += 0.04  # ЭНИАК
+            if y == 1948: s.I += 0.07               # Шеннон: информация
+            if y == 1956: s.I += 0.05               # AI Dartmouth
+            if y == 1969: s.C += 0.08; s.S += 0.05  # ARPANET
+            if y == 1971: s.I += 0.04               # email
+            if y == 1983: s.C += 0.05               # TCP/IP
+            if y == 1991: s.C += 0.10; s.I += 0.05  # WWW
+            if y == 2006: s.I += 0.07               # Cloud, big data
+            if y == 2012: s.I += 0.08               # deep learning breakthrough
+            if y == 2017: s.I += 0.07               # transformer
+            if y == 2022: s.I += 0.12; s.C += 0.08  # LLM explosion
+            if 2020 <= y <= 2060: s.I += 0.008; s.C += 0.006
+        
+        # ▸ Квантовая физика
+        if n == "Квантовая физ.":
+            if y == 1900: s.I += 0.08               # Планк
+            if y == 1905: s.I += 0.09               # Эйнштейн
+            if y == 1913: s.I += 0.06               # Бор
+            if y == 1925: s.I += 0.10; s.C += 0.04  # Гейзенберг, Шрёдингер
+            if y == 1928: s.I += 0.07               # Дирак
+            if y == 1935: s.I += 0.05               # ЭПР, квантовая запутанность
+            if y == 1948: s.I += 0.06               # Фейнман
+            if y == 1964: s.I += 0.05               # Теорема Белла
+            if y == 1982: s.I += 0.04; s.C += 0.03  # Эсперимент Аспе
+            if 2000 <= y <= 2050: s.S += 0.006; s.I += 0.005  # квантовые компьютеры
+        
+        # ▸ ИИ
+        if n == "ИИ":
+            if y == 1956: s.I += 0.06               # Dartmouth
+            if y == 1966: s.I += 0.04               # ELIZA
+            if y == 1980: s.I += 0.05               # expert systems
+            if y == 1986: s.I += 0.05               # backpropagation
+            if y == 1997: s.I += 0.04; s.C += 0.03  # Deep Blue
+            if y == 2006: s.I += 0.06               # deep learning
+            if y == 2012: s.I += 0.08               # AlexNet
+            if y == 2017: s.I += 0.09               # Transformer
+            if y == 2020: s.I += 0.10               # GPT-3
+            if y == 2022: s.I += 0.12; s.C += 0.10  # ChatGPT
+            if y == 2024: s.I += 0.08; s.S += 0.06  # GPT-4, Claude, Gemini
+            if 2020 <= y <= 2060:
+                s.I += 0.010; s.C += 0.008; s.S += 0.005
+
+    # ── Межсекторные потоки ──────────────────────────────────────
+    
+    def _cross_pollinate(self, y: int):
+        """
+        Научные революции возникают на стыках секторов.
+        Каждый сектор с CD > 0.4 «просачивает» знания в соседние.
+        """
+        alive = [s for s in self.sectors if s.alive]
+        high = [s for s in alive if s.cd > 0.35]
+        
+        flow_total = 0.0
+        for donor in high:
+            for recv in alive:
+                if donor is recv:
+                    continue
+                # Поток пропорционален I донора и обратно пропорционален расстоянию
+                # между «позициями» секторов в conceptual space
+                flow = donor.I * 0.0006 * recv.C
+                if flow > 0.0001:
+                    recv.I += flow
+                    flow_total += flow
+                    if flow > 0.002:
+                        self.cross_flows.append(
+                            CrossFlow(y, donor.name, recv.name, flow,
+                                      f"{donor.icon}→{recv.icon}")
+                        )
+        
+        # Конкуренция за «внимание» (ограниченный ресурс)
+        total_impact = sum(s.impact for s in alive)
+        if total_impact > 1.0:
+            for s in alive:
+                s.impact /= (total_impact * 1.01)
+        
+        return flow_total
+
+    # ── Основной цикл ─────────────────────────────────────────────
+    
+    def run(self):
+        print("═" * 72)
+        print("  UAF v2.1  ·  ЭВОЛЮЦИЯ НАУКИ И ТЕХНОЛОГИЙ")
+        print(f"  Период: {abs(self.T0)} до н.э. — {self.T1} н.э.")
+        print("  Секторов: " + " │ ".join(
+            f"{s.icon} {s.name}" for s in self.sectors
+        ))
+        print("═" * 72)
+        
+        for y in self.years:
+            for s in self.sectors:
+                if y >= s.birth and not s.alive:
+                    s.activate()
+                if not s.alive:
+                    s.record()
+                    continue
+                
+                age = max(1, y - s.birth)
+                s.grow(age)
+                self._inject(s, y)
+                s.S = float(np.clip(s.S, 0.01, 1.0))
+                s.C = float(np.clip(s.C, 0.01, 1.0))
+                s.I = float(np.clip(s.I, 0.01, 1.0))
+                
+                # Рекурсия!
+                s.update_meta()
+                
+                # Влияние
+                cd = s.cd
+                s.impact += cd * 0.0022 * (1 - s.impact) * (1 + s.level * 0.5)
+                s.impact = float(np.clip(s.impact, 0.001, 0.95))
+                
+                # Tipping Point
+                if s.check_level():
+                    self.tp_events.append((y, s.name, s.level, cd))
+                    s.impact = min(0.95, s.impact * (1 + 0.3 * s.level))
+                
+                s.record()
+            
+            self._cross_pollinate(y)
+        
+        self._report()
+    
+    def _report(self):
+        desc = {1: "Организ. знание", 2: "Парадигма", 3: "Унив. теория"}
+        print(f"\n📌 TIPPING POINTS:")
+        print("─" * 72)
+        for y, nm, lv, cd in self.tp_events:
+            yl = f"{abs(y)} до н.э." if y < 0 else f"{y} н.э."
+            print(f"  {yl:>14s} │ {nm:<16s} │ → L{lv} │ CD={cd:.3f} │ {desc.get(lv, '')}")
+        
+        print(f"\n📊 ФИНАЛ ({self.T1} н.э.):")
+        print("─" * 72)
+        for s in sorted(self.sectors, key=lambda x: x.cd, reverse=True):
+            if s.alive:
+                meta_bar = "▓" * int(s.meta_awareness * 15)
+                print(f"  {s.icon} {s.name:<16s} CD={s.cd:.3f} L{s.level}"
+                      f" │ S={s.S:.2f} C={s.C:.2f} I={s.I:.2f}"
+                      f" │ Meta={s.meta_awareness:.2f}"
+                      f" │ Accel=×{1+s.self_acceleration:.2f}"
+                      f" │ {meta_bar}")
+        
+        # Ключевой вывод: рекурсия
+        top = max(self.sectors, key=lambda s: s.self_acceleration if s.alive else 0)
+        print(f"\n🔬 КЛЮЧЕВОЙ ВЫВОД:")
+        print(f"  Максимальное самускорение: {top.icon} {top.name}")
+        print(f"  Meta-awareness: {top.meta_awareness:.3f}")
+        print(f"  Self-acceleration: ×{1+top.self_acceleration:.3f}")
+        print(f"  ▸ Это означает, что {top.name} ускоряет собственное замыкание")
+        print(f"    в {(1+top.self_acceleration):.1f} раза быстрее «слепых» секторов.")
+    
+    # ══════════════════════════════════════════════════════════════
+    # ВИЗУАЛИЗАЦИЯ — 12 панелей
+    # ══════════════════════════════════════════════════════════════
+    
+    def plot(self):
+        Y = self.years
+        n = len(Y)
+        
+        fig = plt.figure(figsize=(22, 30), facecolor=DARK)
+        gs  = gridspec.GridSpec(5, 3, figure=fig,
+            hspace=0.40, wspace=0.30,
+            top=0.955, bottom=0.03, left=0.06, right=0.97)
+        fig.suptitle(
+            'UAF v2.1  ·  ЭВОЛЮЦИЯ НАУКИ И ТЕХНОЛОГИЙ  ·  '
+            'РЕКУРСИВНАЯ МОДЕЛЬ',
+            fontsize=15, fontweight='bold', color='white', y=0.99)
+        
+        axes = [fig.add_subplot(gs[r, c])
+                for r in range(5) for c in range(3)]
+        for a in axes:
+            a.set_facecolor(PANEL)
+            a.tick_params(colors=DIM, labelsize=7.5)
+            for sp in a.spines.values():
+                sp.set_edgecolor(GRID)
+        
+        # ── P1: Closure Degree ──
+        ax = axes[0]
+        for s in self.sectors:
+            ax.plot(Y, s.hist['cd'], color=s.color, lw=1.6, alpha=0.9,
+                    label=f"{s.icon} {s.name}")
+        for lv, yv, c in [(1, TP[1], '#00ffff'), (2, TP[2], '#ff9900'), (3, TP[3], '#ff3333')]:
+            ax.axhline(yv, color=c, alpha=0.3, ls='--', lw=0.7)
+            ax.text(self.T1+30, yv, f'L{lv}', fontsize=7, color=c, va='center')
+        ax.set(xlim=(self.T0, self.T1), ylim=(0, 1.05),
+               title='P1 · Closure Degree', ylabel='CD')
+        ax.legend(fontsize=5.5, ncol=3, framealpha=0.4, loc='upper left')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P2: Impact (влияние) ──
+        ax = axes[1]
+        for s in self.sectors:
+            ax.fill_between(Y, 0, s.hist['impact'], color=s.color, alpha=0.15)
+            ax.plot(Y, s.hist['impact'], color=s.color, lw=1.2, label=s.name)
+        ax.set(xlim=(self.T0, self.T1), title='P2 · Влияние (Impact)',
+               ylabel='Impact')
+        ax.legend(fontsize=5.5, ncol=3, framealpha=0.4, loc='upper left')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P3: MultiLevel ──
+        ax = axes[2]
+        for i, s in enumerate(self.sectors):
+            off = i * 0.07
+            yv = [l + off for l in s.hist['level']]
+            ax.step(Y, yv, color=s.color, lw=1.8, where='post',
+                    label=s.name)
+        ax.set(xlim=(self.T0, self.T1), title='P3 · MultiLevel L0→L3',
+               ylabel='Уровень')
+        ax.set_yticks([0, 1, 2, 3])
+        ax.set_yticklabels(['L0 Прото', 'L1 Организ.', 'L2 Парадигма', 'L3 Универс.'],
+                           fontsize=7)
+        ax.legend(fontsize=5.5, ncol=3, framealpha=0.4, loc='upper left')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P4/P5: S-C-I для двух секторов ──
+        for idx, nm, lbl in [(3, "Информатика", "💻 Информатика"),
+                             (4, "ИИ",           "🤖 ИИ")]:
+            ax = axes[idx]
+            s = next(x for x in self.sectors if x.name == nm)
+            ax.plot(Y, s.hist['S'], '#4488ff', lw=1.5, label='S Структура')
+            ax.plot(Y, s.hist['C'], '#ff4444', lw=1.5, label='C Катализ')
+            ax.plot(Y, s.hist['I'], '#44ff88', lw=1.5, label='I Информация')
+            ax.plot(Y, s.hist['cd'], '#fff', lw=2, ls='--', label='CD')
+            ax.set(xlim=(max(s.birth, self.T0), self.T1), ylim=(0, 1.05),
+                   title=f'P{idx+1} · S-C-I: {lbl}', ylabel='Значение')
+            ax.legend(fontsize=7, framealpha=0.5)
+            ax.grid(True, alpha=0.12)
+        
+        # ── P6: Карта TP ──
+        ax = axes[5]
+        mkr = {1: 'o', 2: 's', 3: '*'}
+        for y, nm, lv, cd in self.tp_events:
+            s = next(x for x in self.sectors if x.name == nm)
+            ax.scatter(y, cd, c=s.color, s=70+lv*80,
+                       marker=mkr.get(lv, 'o'),
+                       edgecolors='white', lw=0.7, zorder=5)
+            ax.annotate(f"{nm[:8]}→L{lv}", (y, cd), fontsize=5,
+                        color='#aaa', rotation=30, xytext=(4, 4),
+                        textcoords='offset points')
+        for lv, yv, c in [(1, TP[1], '#00ffff'), (2, TP[2], '#ff9900'), (3, TP[3], '#ff3333')]:
+            ax.axhline(yv, color=c, alpha=0.3, ls='--')
+        ax.set(xlim=(self.T0, self.T1), ylim=(0, 1.05),
+               title='P6 · Карта TippingPoints', ylabel='CD')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P7: Meta-awareness (ОСОЗНАННОСТЬ) ──
+        ax = axes[6]
+        for s in self.sectors:
+            ax.plot(Y, s.hist['meta'], color=s.color, lw=1.6, alpha=0.85,
+                    label=f"{s.icon} {s.name}")
+        ax.set(xlim=(self.T0, self.T1), ylim=(0, 1.05),
+               title='P7 · Meta-awareness (осознание собственных паттернов)',
+               ylabel='Meta-awareness')
+        ax.legend(fontsize=5.5, ncol=3, framealpha=0.4, loc='upper left')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P8: Self-acceleration ──
+        ax = axes[7]
+        for s in self.sectors:
+            accel_vals = [1 + a for a in s.hist['accel']]
+            ax.plot(Y, accel_vals, color=s.color, lw=1.6, alpha=0.85,
+                    label=f"{s.icon} {s.name}")
+        ax.axhline(1.0, color='white', alpha=0.2, ls='--')
+        ax.text(self.T0+50, 1.02, '×1 = нет ускорения',
+                fontsize=7, color='#888')
+        ax.set(xlim=(self.T0, self.T1),
+               title='P8 · Self-acceleration (рекурсивный буст)',
+               ylabel='Множитель ускорения')
+        ax.legend(fontsize=5.5, ncol=3, framealpha=0.4, loc='upper left')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P9: Межсекторные потоки ──
+        ax = axes[8]
+        # Агрегация по 50-летним бинам
+        bin_size = 50
+        bins = list(range(self.T0, self.T1+1, bin_size))
+        flow_by_bin = [0.0] * len(bins)
+        for cf in self.cross_flows:
+            idx = min((cf.year - self.T0) // bin_size, len(bins)-1)
+            if 0 <= idx < len(bins):
+                flow_by_bin[idx] += cf.flow
+        
+        ax.bar(bins, flow_by_bin, width=bin_size*0.8,
+               color='#cc66ff', alpha=0.6)
+        ax.plot(bins, flow_by_bin, color='#cc66ff', lw=1.5, alpha=0.9)
+        ax.set(xlim=(self.T0, self.T1),
+               title='P9 · Межсекторные информационные потоки',
+               ylabel='Суммарный трансфер')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P10: Фазовое пространство S–C (финал) ──
+        ax = axes[9]
+        ss = np.linspace(0.01, 1.0, 300)
+        for cd_v, cl in [(TP[1], '#00ffff'), (TP[2], '#ff9900'), (TP[3], '#ff3333')]:
+            for iv in [0.5, 0.8, 1.0]:
+                cc = cd_v**3 / (ss * iv + 1e-9)
+                cc = np.where(cc <= 1.0, cc, np.nan)
+                ax.plot(ss, cc, color=cl, alpha=0.10, lw=0.6)
+        for s in self.sectors:
+            if s.alive:
+                ax.scatter(s.S, s.C, s=s.I*800+50,
+                           c=s.color, edgecolors='white', alpha=0.9,
+                           lw=1, zorder=5)
+                ax.annotate(f"{s.icon}{s.name[:8]}", (s.S, s.C),
+                            fontsize=6.5, color=s.color, ha='center',
+                            xytext=(0, 10), textcoords='offset points')
+        ax.set(xlim=(0, 1.1), ylim=(0, 1.1),
+               title='P10 · Фазовое S–C (размер=I)', xlabel='S', ylabel='C')
+        ax.grid(True, alpha=0.12)
+        
+        # ── P11: Итоговый CD ──
+        ax = axes[10]
+        alive = sorted([s for s in self.sectors if s.alive],
+                       key=lambda x: x.cd)
+        names = [f"{s.icon} {s.name}" for s in alive]
+        cds   = [s.cd for s in alive]
+        cols  = [s.color for s in alive]
+        ax.barh(range(len(names)), cds, color=cols, alpha=0.8,
+                edgecolor='white', linewidth=0.5)
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(names, fontsize=7.5)
+        for i, (cd, s) in enumerate(zip(cds, alive)):
+            ax.text(cd+0.01, i, f'L{s.level} {cd:.3f}', va='center',
+                    fontsize=7, color=TXT)
+        for xv, c in [(TP[1], '#00ffff'), (TP[2], '#ff9900'), (TP[3], '#ff3333')]:
+            ax.axvline(xv, color=c, alpha=0.3, ls='--')
+        ax.set(xlim=(0, 1.15), title='P11 · Итоговый CD', xlabel='CD')
+        ax.grid(True, alpha=0.12, axis='x')
+        
+        # ── P12: Radar (топ-5 по meta-awareness) ──
+        ax12 = fig.add_subplot(gs[4, 2], polar=True)
+        ax12.set_facecolor(PANEL)
+        cats = ['S', 'C', 'I', 'Meta', 'Accel']
+        N_c = len(cats)
+        angles = [n / N_c * 2 * np.pi for n in range(N_c)] + [0]
+        
+        top5 = sorted([s for s in self.sectors if s.alive],
+                      key=lambda x: x.self_acceleration, reverse=True)[:5]
+        for s in top5:
+            vals = [s.S, s.C, s.I, s.meta_awareness,
+                    min(1.0, s.self_acceleration / 1.5)]
+            vals += vals[:1]
+            ax12.plot(angles, vals, color=s.color, lw=1.3, alpha=0.85)
+            ax12.fill(angles, vals, color=s.color, alpha=0.06)
+        
+        ax12.set_xticks(angles[:-1])
+        ax12.set_xticklabels(cats, size=7.5, color=TXT)
+        ax12.set_yticks([0.25, 0.50, 0.75])
+        ax12.set_yticklabels(['0.25', '0.50', '0.75'], size=5.5, color=DIM)
+        ax12.tick_params(colors=DIM)
+        ax12.set_title('P12 · Радар S-C-I-Meta (топ-5 рекурсии)',
+                       pad=15, fontsize=8, color=TXT)
+        ax12.spines['polar'].set_edgecolor(GRID)
+        ax12.yaxis.grid(True, color=GRID, alpha=0.3)
+        ax12.xaxis.grid(True, color=GRID, alpha=0.3)
+        
+        patches = [mpatches.Patch(color=s.color, label=f"{s.icon} {s.name}")
+                   for s in top5]
+        ax12.legend(handles=patches, fontsize=5.5, loc='upper right',
+                    bbox_to_anchor=(1.5, 1.15), framealpha=0.5)
+        
+        plt.savefig('uaf_science_tech.png', dpi=140,
+                    bbox_inches='tight', facecolor=fig.get_facecolor())
+        plt.show()
+        print("\n✅ 12 панелей · Файл: uaf_science_tech.png")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ЗАПУСК
+# ══════════════════════════════════════════════════════════════════════
+sim = ScienceTechUAF()
+sim.run()
+sim.plot()
