@@ -1,0 +1,676 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  UAF v2.1 — Эволюция культуры и религии
+#  Colab-ready | numpy + matplotlib only | Время: ~10-20 сек
+# ═══════════════════════════════════════════════════════════════════════
+
+import numpy as np
+import matplotlib
+matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+import matplotlib.pyplot as plt
+import random
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
+# ── Воспроизводимость ──
+np.random.seed(42)
+random.seed(42)
+
+# ── Стиль графиков ──
+plt.rcParams.update({
+    'figure.facecolor': '#0e1117',
+    'axes.facecolor':   '#1a1d23',
+    'axes.edgecolor':   '#333333',
+    'axes.labelcolor':  '#cccccc',
+    'text.color':       '#cccccc',
+    'xtick.color':      '#999999',
+    'ytick.color':      '#999999',
+    'grid.color':       '#333333',
+    'legend.facecolor': '#1a1d23',
+    'legend.edgecolor': '#444444',
+})
+
+# ═══════════════════════════════════════════════════════════════════════
+#  ЧАСТЬ A: Агентная микромодель (исправленная, быстрая)
+# ═══════════════════════════════════════════════════════════════════════
+
+class AgentMicroModel:
+    """
+    Быстрая агентная модель культурной эволюции.
+    Вместо O(N^2) попарных взаимодействий используем
+    случайную выборку K контактов на агента за шаг.
+    """
+
+    def __init__(self, n_agents=500, n_steps=300, k_contacts=5):
+        self.n_agents = n_agents
+        self.n_steps = n_steps
+        self.k_contacts = k_contacts  # контактов на агента за шаг
+
+        # Параметры
+        self.closure_threshold = 0.65
+        self.mutation_rate = 0.03
+        self.learning_rate = 0.08
+        self.drift_rate = 0.0008  # направленный дрейф к усложнению
+
+        # Инициализация: все начинают у L0 (анимизм, мин. ритуализм)
+        self.beliefs = np.column_stack([
+            np.random.beta(2, 5, n_agents),   # теизм: смещено к 0
+            np.random.beta(1.5, 5, n_agents)  # ритуализм: смещено к 0
+        ])
+
+        # История
+        self.hist_mean_theism = []
+        self.hist_mean_ritual = []
+        self.hist_var_theism = []
+        self.hist_var_ritual = []
+        self.hist_closure = []
+        self.hist_level = []
+        self.tipping_points = []
+
+    def _closure_degree(self) -> float:
+        """Степень замыкания: консенсус + структурная целостность"""
+        var_t = np.var(self.beliefs[:, 0])
+        var_r = np.var(self.beliefs[:, 1])
+        consensus_t = 1.0 - min(var_t * 12.0, 1.0)
+        consensus_r = 1.0 - min(var_r * 12.0, 1.0)
+        overall_var = np.var(self.beliefs)
+        integrity = 1.0 - min(overall_var * 6.0, 1.0)
+        return float(np.clip(
+            consensus_t * 0.4 + consensus_r * 0.3 + integrity * 0.3,
+            0.0, 1.0
+        ))
+
+    def _get_level(self) -> int:
+        mt = np.mean(self.beliefs[:, 0])
+        mr = np.mean(self.beliefs[:, 1])
+        if mt >= 0.75 and mr >= 0.65:
+            return 3
+        elif mt >= 0.55 and mr >= 0.40:
+            return 2
+        elif mt >= 0.30 or mr >= 0.20:
+            return 1
+        else:
+            return 0
+
+    def run(self):
+        prev_level = 0
+        for step in range(self.n_steps):
+            n = self.n_agents
+
+            # ── 1. Направленный дрейф (культурное усложнение) ──
+            # Чем больше среднее значение, тем слабее дрейф (логистика)
+            mean_b = np.mean(self.beliefs, axis=0)
+            drift = self.drift_rate * (1.0 - mean_b)
+            # Экспериментатор: с вероятностью 5% — сильный буст
+            if random.random() < 0.05:
+                drift *= 5.0
+            self.beliefs += drift
+            self.beliefs = np.clip(self.beliefs, 0, 1)
+
+            # ── 2. Мутации (случайные инновации) ──
+            mask = np.random.rand(n) < self.mutation_rate
+            n_mut = np.sum(mask)
+            if n_mut > 0:
+                shifts = (np.random.rand(n_mut, 2) - 0.5) * 0.25
+                self.beliefs[mask] += shifts
+                self.beliefs = np.clip(self.beliefs, 0, 1)
+
+            # ── 3. Взаимодействия (K случайных контактов) ──
+            for _ in range(self.k_contacts):
+                # Случайные пары
+                idx_a = np.arange(n)
+                idx_b = np.random.randint(0, n, size=n)
+                # Расстояние
+                diff = self.beliefs[idx_a] - self.beliefs[idx_b]
+                dist = np.sqrt(np.sum(diff**2, axis=1))
+                # Близкие → притягиваются
+                close = dist < 0.5
+                if np.any(close):
+                    mean_pair = (self.beliefs[idx_a[close]] +
+                                 self.beliefs[idx_b[close]]) / 2.0
+                    self.beliefs[idx_a[close]] = (
+                        self.beliefs[idx_a[close]] * (1 - self.learning_rate) +
+                        mean_pair * self.learning_rate
+                    )
+                    self.beliefs = np.clip(self.beliefs, 0, 1)
+
+            # ── 4. Запись статистики ──
+            cd = self._closure_degree()
+            lvl = self._get_level()
+
+            self.hist_mean_theism.append(np.mean(self.beliefs[:, 0]))
+            self.hist_mean_ritual.append(np.mean(self.beliefs[:, 1]))
+            self.hist_var_theism.append(np.var(self.beliefs[:, 0]))
+            self.hist_var_ritual.append(np.var(self.beliefs[:, 1]))
+            self.hist_closure.append(cd)
+            self.hist_level.append(lvl)
+
+            # ── 5. Tipping point detection ──
+            if lvl > prev_level:
+                self.tipping_points.append((step, prev_level, lvl, cd))
+            prev_level = lvl
+
+        return self
+
+    def plot(self, fig, axes_row):
+        """Построить 3 графика в переданном ряду axes"""
+        steps = np.arange(self.n_steps)
+
+        # График A1: Средние убеждения
+        ax = axes_row[0]
+        ax.plot(steps, self.hist_mean_theism, '#4488ff', lw=2,
+                label='Теизм (0=аним.→1=монот.)')
+        ax.plot(steps, self.hist_mean_ritual, '#ff6644', lw=2,
+                label='Ритуализм')
+        for tp_step, old, new, cd in self.tipping_points:
+            ax.axvline(tp_step, color='#ffcc00', ls='--', alpha=0.6)
+            ax.text(tp_step + 2, 0.95, f'L{old}→L{new}',
+                    fontsize=7, color='#ffcc00')
+        ax.axhline(0.30, color='#4488ff', ls=':', alpha=0.3)
+        ax.axhline(0.55, color='#4488ff', ls=':', alpha=0.3)
+        ax.axhline(0.75, color='#4488ff', ls=':', alpha=0.3)
+        ax.set(ylabel='Значение', title='A1 · Агенты: средние убеждения',
+               xlim=(0, self.n_steps), ylim=(0, 1.05))
+        ax.legend(fontsize=7, loc='lower right')
+        ax.grid(True, alpha=0.2)
+
+        # График A2: Closure degree
+        ax = axes_row[1]
+        ax.plot(steps, self.hist_closure, '#44ffaa', lw=2.5)
+        ax.axhline(self.closure_threshold, color='#ff4444', ls='--',
+                    label=f'Порог TP ({self.closure_threshold})')
+        ax.fill_between(steps, 0, self.closure_threshold,
+                        alpha=0.05, color='red')
+        ax.fill_between(steps, self.closure_threshold, 1,
+                        alpha=0.05, color='green')
+        for tp_step, old, new, cd in self.tipping_points:
+            ax.scatter(tp_step, cd, c='#ffcc00', s=100, zorder=5,
+                       edgecolors='white', lw=1.5)
+        ax.set(ylabel='Closure Degree',
+               title='A2 · Замыкание адаптивного контура',
+               xlim=(0, self.n_steps), ylim=(0, 1.05))
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.2)
+
+        # График A3: Фазовый портрет (финальные убеждения)
+        ax = axes_row[2]
+        lvl = self.hist_level[-1] if self.hist_level else 0
+        cmap = plt.cm.viridis
+        sc = ax.scatter(self.beliefs[:, 0], self.beliefs[:, 1],
+                        c=np.linalg.norm(self.beliefs, axis=1),
+                        cmap=cmap, s=12, alpha=0.6)
+        ax.set(xlabel='Теизм', ylabel='Ритуализм',
+               title=f'A3 · Финальное распределение (L{lvl})',
+               xlim=(0, 1), ylim=(0, 1))
+        ax.grid(True, alpha=0.2)
+        plt.colorbar(sc, ax=ax, label='||beliefs||', shrink=0.7)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  ЧАСТЬ B: Макромодель — исторические традиции (исправленная)
+# ═══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class Tradition:
+    name: str
+    birth_year: int
+    color: str
+    sg: float      # structure growth rate
+    cg: float      # catalysis growth rate
+    ig: float      # information growth rate
+    tp1: float     # threshold L0→L1
+    tp2: float     # threshold L1→L2
+    tp3: float     # threshold L2→L3
+    S: float = 0.04
+    C: float = 0.04
+    I: float = 0.03
+    fol: float = 0.005
+    level: int = 0
+    alive: bool = False
+    # Histories
+    h_cd:  List[float] = field(default_factory=list)
+    h_fol: List[float] = field(default_factory=list)
+    h_lvl: List[int]   = field(default_factory=list)
+    h_s:   List[float] = field(default_factory=list)
+    h_c:   List[float] = field(default_factory=list)
+    h_i:   List[float] = field(default_factory=list)
+
+    @property
+    def cd(self) -> float:
+        return float(np.clip((self.S * self.C * self.I) ** (1/3), 0, 1))
+
+
+@dataclass
+class TPLog:
+    year: int
+    name: str
+    old: int
+    new: int
+    cd: float
+
+
+class MacroHistoryModel:
+    """Макроисторическая модель: 8 традиций, 5000 лет"""
+
+    def __init__(self):
+        self.t0, self.t1, self.dt = -3000, 2050, 10
+        self.years = list(range(self.t0, self.t1 + 1, self.dt))
+        self.tp_log: List[TPLog] = []
+        self.traditions = self._make()
+
+    def _make(self) -> List[Tradition]:
+        return [
+            Tradition("Месопотамский полит.",  -3000, "#DAA520",
+                      0.0030, 0.0020, 0.0025, 0.18, 0.42, 0.70),
+            Tradition("Ведизм / Индуизм",      -1500, "#FF6347",
+                      0.0040, 0.0030, 0.0050, 0.20, 0.46, 0.72),
+            Tradition("Иудаизм",               -1200, "#4169E1",
+                      0.0050, 0.0035, 0.0065, 0.20, 0.45, 0.71),
+            Tradition("Кит. философия",         -600, "#FF4444",
+                      0.0055, 0.0060, 0.0065, 0.22, 0.48, 0.74),
+            Tradition("Буддизм",                -500, "#FFA500",
+                      0.0060, 0.0065, 0.0055, 0.20, 0.44, 0.70),
+            Tradition("Христианство",             30, "#00CC66",
+                      0.0075, 0.0085, 0.0070, 0.18, 0.40, 0.66),
+            Tradition("Ислам",                   622, "#22BBAA",
+                      0.0090, 0.0100, 0.0085, 0.18, 0.38, 0.64),
+            Tradition("Науч. мировоззрение",    1500, "#BB44FF",
+                      0.0110, 0.0130, 0.0170, 0.20, 0.44, 0.70),
+        ]
+
+    def _catalyze(self, t: Tradition, y: int):
+        n = t.name
+        # Осевое время
+        if -800 <= y <= -200 and n in [
+                "Ведизм / Индуизм", "Иудаизм",
+                "Кит. философия", "Буддизм"]:
+            t.C += 0.0025
+            t.I += 0.0035
+
+        # Месопотамия
+        if "Месоп" in n:
+            if -2500 <= y <= -1500:
+                t.S += 0.002
+            if y > -500:
+                t.S *= 0.996; t.C *= 0.994
+            if y > 100:
+                t.fol *= 0.990
+
+        # Иудаизм
+        if "Иуда" in n:
+            if y == -960:
+                t.S += 0.06
+            if -500 <= y <= -400:
+                t.I += 0.06
+            if y == 70:
+                t.S *= 0.65; t.C += 0.04
+
+        # Индуизм
+        if "Вед" in n:
+            if -600 <= y <= -200:
+                t.I += 0.004
+            if 300 <= y <= 600:
+                t.S += 0.003
+
+        # Буддизм
+        if "Будд" in n:
+            if y == -260:
+                t.C += 0.08; t.S += 0.05
+            if 50 <= y <= 500:
+                t.C += 0.002
+
+        # Кит. философия
+        if "Кит" in n:
+            if y == -200:
+                t.S += 0.07
+            if 600 <= y <= 900:
+                t.C += 0.003
+
+        # Христианство
+        if "Христ" in n:
+            if 30 <= y <= 100:
+                t.C += 0.018
+            if y == 310:
+                t.S += 0.10; t.C += 0.05
+            if 325 <= y <= 500:
+                t.I += 0.005
+            if y == 1054:
+                t.S *= 0.94
+            if y == 1520:
+                t.C += 0.04; t.I += 0.04
+            if 1500 <= y <= 1800:
+                t.fol += 0.0015
+
+        # Ислам
+        if "Исла" in n:
+            if 622 <= y <= 660:
+                t.C += 0.028; t.S += 0.02
+            if 700 <= y <= 900:
+                t.I += 0.007; t.C += 0.003
+            if y == 1258:
+                t.S *= 0.82
+
+        # Научное
+        if "Науч" in n:
+            if y == 1500: t.I += 0.03
+            if y == 1690: t.I += 0.05; t.C += 0.03
+            if y == 1790: t.S += 0.05; t.C += 0.04
+            if y == 1860: t.I += 0.05
+            if 1900 <= y <= 2050:
+                t.S += 0.004; t.C += 0.005; t.I += 0.007
+
+    def run(self):
+        print("=" * 72)
+        print("  МАКРОМОДЕЛЬ КУЛЬТУРНО-РЕЛИГИОЗНОЙ ЭВОЛЮЦИИ  ·  UAF v2.1")
+        print(f"  Период: {abs(self.t0)} до н.э. — {self.t1} н.э.  |"
+              f"  Шаг: {self.dt} лет  |  Традиций: {len(self.traditions)}")
+        print("=" * 72)
+
+        for y in self.years:
+            for t in self.traditions:
+                # Активация
+                if y >= t.birth_year and not t.alive:
+                    t.alive = True
+                    t.S   = 0.04 + random.uniform(0, 0.04)
+                    t.C   = 0.04 + random.uniform(0, 0.04)
+                    t.I   = 0.03 + random.uniform(0, 0.03)
+                    t.fol = 0.005
+
+                if not t.alive:
+                    t.h_cd.append(0); t.h_fol.append(0)
+                    t.h_lvl.append(0); t.h_s.append(0)
+                    t.h_c.append(0); t.h_i.append(0)
+                    continue
+
+                # Рост (логистика + шум)
+                age = max(1, y - t.birth_year)
+                gm = 1.0 / (1.0 + 8e-5 * age)
+                for attr, rate in [('S', t.sg), ('C', t.cg), ('I', t.ig)]:
+                    v = getattr(t, attr)
+                    dv = (rate * gm + random.gauss(0, 0.0015)) * (1 - v * 0.25)
+                    setattr(t, attr, float(np.clip(v + dv, 0.01, 1.0)))
+
+                # Каталитические события
+                self._catalyze(t, y)
+                t.S = float(np.clip(t.S, 0.01, 1.0))
+                t.C = float(np.clip(t.C, 0.01, 1.0))
+                t.I = float(np.clip(t.I, 0.01, 1.0))
+
+                # Последователи
+                cd = t.cd
+                t.fol += cd * 0.0018 * (1 - t.fol) * (1 + t.level * 0.4)
+                t.fol = float(np.clip(t.fol, 0.001, 0.95))
+
+                # Tipping point
+                old_lvl = t.level
+                if cd >= t.tp3 and t.level < 3:
+                    t.level = 3
+                elif cd >= t.tp2 and t.level < 2:
+                    t.level = 2
+                elif cd >= t.tp1 and t.level < 1:
+                    t.level = 1
+                if t.level > old_lvl:
+                    self.tp_log.append(TPLog(y, t.name, old_lvl, t.level, cd))
+                    t.fol = min(0.95, t.fol * (1 + 0.25 * t.level))
+
+                t.h_cd.append(t.cd); t.h_fol.append(t.fol)
+                t.h_lvl.append(t.level); t.h_s.append(t.S)
+                t.h_c.append(t.C); t.h_i.append(t.I)
+
+            # Конкуренция
+            alive = [tr for tr in self.traditions if tr.alive]
+            total = sum(tr.fol for tr in alive)
+            if total > 1.0:
+                for tr in alive:
+                    tr.fol /= (total * 1.02)
+
+        # Печать результатов
+        self._print_results()
+        return self
+
+    def _print_results(self):
+        lvl_desc = {1: "Лок. культ", 2: "Орг. религия", 3: "Универс. система"}
+        print(f"\n{'='*72}")
+        print("  ТОЧКИ ПЕРЕХОДА (Tipping Points):")
+        print(f"{'─'*72}")
+        for e in sorted(self.tp_log, key=lambda x: x.year):
+            ys = (f"{abs(e.year)} до н.э." if e.year < 0
+                  else f"{e.year} н.э.")
+            print(f"  {ys:>15s} | {e.name:<24s} | L{e.old}->L{e.new}"
+                  f" | CD={e.cd:.3f} | {lvl_desc.get(e.new, '')}")
+
+        print(f"\n{'='*72}")
+        print(f"  ФИНАЛЬНОЕ СОСТОЯНИЕ ({self.t1} н.э.):")
+        print(f"{'─'*72}")
+        for t in sorted(self.traditions, key=lambda x: x.cd, reverse=True):
+            if t.alive:
+                print(f"  {t.name:<24s} | CD={t.cd:.3f} | L{t.level}"
+                      f" | S={t.S:.2f} C={t.C:.2f} I={t.I:.2f}"
+                      f" | fol={t.fol:.3f}")
+        print("=" * 72)
+
+    def plot(self, fig, axes_grid):
+        """5 графиков макромодели в axes_grid (5 axes)"""
+        Y = np.array(self.years)
+
+        # ═══ B1: Closure Degree ═══
+        ax = axes_grid[0]
+        for t in self.traditions:
+            ax.plot(Y, t.h_cd, color=t.color, lw=2, alpha=0.9, label=t.name)
+        ax.axvspan(-800, -200, alpha=0.07, color='gold')
+        ax.text(-500, 0.03, 'Осевое\nвремя', ha='center', fontsize=7,
+                color='gold', style='italic')
+        for lbl, yv, c in [('L1', 0.22, 'cyan'),
+                            ('L2', 0.45, 'orange'),
+                            ('L3', 0.70, 'red')]:
+            ax.axhline(yv, color=c, alpha=0.3, ls='--', lw=1)
+            ax.text(self.t1 + 30, yv, lbl, fontsize=8, color=c, va='center')
+        ax.set(ylabel='Closure Degree',
+               title='B1 · Замыкание адаптивного контура',
+               xlim=(self.t0, self.t1), ylim=(0, 1.05))
+        ax.legend(fontsize=6, loc='upper left', ncol=2, framealpha=0.5)
+        ax.grid(True, alpha=0.2)
+
+        # ═══ B2: Followers ═══
+        ax = axes_grid[1]
+        for t in self.traditions:
+            ax.fill_between(Y, 0, t.h_fol, color=t.color, alpha=0.15)
+            ax.plot(Y, t.h_fol, color=t.color, lw=1.5, label=t.name)
+        ax.set(ylabel='Доля последователей',
+               title='B2 · Распространение традиций',
+               xlim=(self.t0, self.t1))
+        ax.legend(fontsize=6, loc='upper left', ncol=2, framealpha=0.5)
+        ax.grid(True, alpha=0.2)
+
+        # ═══ B3: Multi-level ═══
+        ax = axes_grid[2]
+        for i, t in enumerate(self.traditions):
+            off = i * 0.06
+            shifted = [l + off for l in t.h_lvl]
+            ax.step(Y, shifted, color=t.color, lw=2, where='post',
+                    label=t.name)
+        ax.set(ylabel='Уровень',
+               title='B3 · MultiLevel переходы (L0->L3)',
+               xlim=(self.t0, self.t1))
+        ax.set_yticks([0, 1, 2, 3])
+        ax.set_yticklabels(['L0 Прото', 'L1 Культ',
+                            'L2 Орг.рел.', 'L3 Универс.'], fontsize=7)
+        ax.legend(fontsize=6, loc='upper left', ncol=2, framealpha=0.5)
+        ax.grid(True, alpha=0.2)
+
+        # ═══ B4: S-C-I для Христианства ═══
+        ax = axes_grid[3]
+        ch = [t for t in self.traditions if "Христ" in t.name][0]
+        ax.plot(Y, ch.h_s, '#4488ff', lw=2, label='S: Структура')
+        ax.plot(Y, ch.h_c, '#ff4444', lw=2, label='C: Катализ')
+        ax.plot(Y, ch.h_i, '#44ff88', lw=2, label='I: Информация')
+        ax.plot(Y, ch.h_cd, '#ffffff', lw=2.5, ls='--', label='CD')
+        for yr, lb, cl in [(30, 'Ап.век', '#44ff88'),
+                            (310, 'Константин', '#4488ff'),
+                            (1054, 'Раскол', '#ff6666'),
+                            (1520, 'Реформ.', '#ffaa44')]:
+            ax.axvline(yr, color=cl, alpha=0.5, ls='--', lw=1)
+            ax.text(yr + 25, 0.95, lb, fontsize=7, color=cl,
+                    rotation=90, va='top')
+        ax.set(xlabel='Год', ylabel='Значение',
+               title='B4 · Компоненты: Христианство',
+               xlim=(-200, self.t1))
+        ax.legend(fontsize=7, framealpha=0.5)
+        ax.grid(True, alpha=0.2)
+
+        # ═══ B5: Tipping Point Map ═══
+        ax = axes_grid[4]
+        markers = ['o', 's', 'D', '*']
+        for e in self.tp_log:
+            tr = [t for t in self.traditions if t.name == e.name][0]
+            sz = 80 + e.new * 60
+            ax.scatter(e.year, e.cd, c=tr.color, s=sz,
+                       edgecolors='white', lw=1.2, zorder=5,
+                       marker=markers[min(e.new, 3)])
+            ax.annotate(f"{e.name[:12]}->L{e.new}", (e.year, e.cd),
+                        fontsize=5, rotation=20, color='#aaaaaa',
+                        xytext=(5, 5), textcoords='offset points')
+        for lbl, yv, c in [('L1', 0.22, 'cyan'),
+                            ('L2', 0.45, 'orange'),
+                            ('L3', 0.70, 'red')]:
+            ax.axhline(yv, color=c, alpha=0.3, ls='--')
+        ax.set(xlabel='Год', ylabel='CD при переходе',
+               title='B5 · Карта Tipping Points',
+               xlim=(self.t0, self.t1), ylim=(0, 1.05))
+        ax.grid(True, alpha=0.2)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  ЧАСТЬ C: Active Experimenter
+# ═══════════════════════════════════════════════════════════════════════
+
+def active_experimenter(macro: MacroHistoryModel):
+    print(f"\n{'='*72}")
+    print("  АКТИВНЫЙ ЭКСПЕРИМЕНТАТОР  ·  UAF Active Experimenter")
+    print(f"{'='*72}")
+
+    exps = []
+
+    # 1. Дисбалансы
+    for t in macro.traditions:
+        if not t.alive:
+            continue
+        vals = {'S': t.S, 'C': t.C, 'I': t.I}
+        weak = min(vals, key=vals.get)
+        strong = max(vals, key=vals.get)
+        gap = vals[strong] - vals[weak]
+        if gap > 0.12:
+            exps.append(
+                f"ДИСБАЛАНС: {t.name}\n"
+                f"    Слабое: {weak}={vals[weak]:.2f}, "
+                f"Сильное: {strong}={vals[strong]:.2f} (gap={gap:.2f})\n"
+                f"    -> Усиление {weak} даст макс. прирост CD "
+                f"(геом. среднее чувствительно к минимуму)"
+            )
+
+    # 2. Контрфактуал
+    exps.append(
+        "КОНТРФАКТУАЛ: мир без Осевого времени\n"
+        "    -> Убрать catalytic boost 800-200 до н.э.\n"
+        "    -> Предсказание: L2 для буддизма/иудаизма на 400-600 лет позже"
+    )
+
+    # 3. Скорость замыкания
+    speeds = []
+    for t in macro.traditions:
+        l2_events = [e for e in macro.tp_log
+                     if e.name == t.name and e.new == 2]
+        if l2_events:
+            dt_to_l2 = l2_events[0].year - t.birth_year
+            speeds.append(f"    {t.name:<24s}: {dt_to_l2:>5d} лет до L2")
+    if speeds:
+        exps.append(
+            "СКОРОСТЬ ЗАМЫКАНИЯ (birth -> L2):\n" +
+            "\n".join(speeds) + "\n"
+            "    -> Поздние традиции замыкаются быстрее "
+            "(наследуют инфраструктуру)"
+        )
+
+    for i, e in enumerate(exps, 1):
+        print(f"\n  Эксперимент #{i}:  {e}")
+    print(f"\n{'='*72}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  ЗАПУСК
+# ═══════════════════════════════════════════════════════════════════════
+
+print("=" * 72)
+print("  UAF v2.1 — ЭВОЛЮЦИЯ КУЛЬТУРЫ И РЕЛИГИИ")
+print("  Две модели: микро (агентная) + макро (исторические традиции)")
+print("=" * 72)
+
+# ── A: Агентная модель ──
+print("\n>>> Запуск агентной микромодели (500 агентов, 300 шагов)...")
+micro = AgentMicroModel(n_agents=500, n_steps=300, k_contacts=5)
+micro.run()
+print(f"    Финальный уровень: L{micro.hist_level[-1]}")
+print(f"    Финальный closure_degree: {micro.hist_closure[-1]:.3f}")
+print(f"    Tipping points: {len(micro.tipping_points)}")
+for step, old, new, cd in micro.tipping_points:
+    print(f"      Шаг {step:3d}: L{old}->L{new}  CD={cd:.3f}")
+
+# ── B: Макромодель ──
+print()
+macro = MacroHistoryModel()
+macro.run()
+
+# ── Графики: 3 строки × 3 столбца ──
+print("\n>>> Построение графиков...")
+fig = plt.figure(figsize=(22, 20))
+fig.suptitle(
+    'ЭВОЛЮЦИЯ КУЛЬТУРЫ И РЕЛИГИИ  ·  UAF v2.1\n'
+    'Микромодель (агенты) + Макромодель (исторические традиции)',
+    fontsize=16, fontweight='bold', color='#ffffff', y=0.995
+)
+
+# Создаём сетку: строка 1 = 3 графика micro, строки 2-3 = 5 графиков macro
+# Используем GridSpec для гибкости
+from matplotlib.gridspec import GridSpec
+gs = GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.30)
+
+# Микро: 3 графика в первом ряду
+ax_micro = [fig.add_subplot(gs[0, i]) for i in range(3)]
+micro.plot(fig, ax_micro)
+
+# Макро: 5 графиков (2 + 3)
+ax_macro = []
+ax_macro.append(fig.add_subplot(gs[1, 0]))
+ax_macro.append(fig.add_subplot(gs[1, 1]))
+ax_macro.append(fig.add_subplot(gs[1, 2]))
+ax_macro.append(fig.add_subplot(gs[2, 0]))
+ax_macro.append(fig.add_subplot(gs[2, 1]))
+macro.plot(fig, ax_macro)
+
+# Финальная bar chart в gs[2, 2]
+ax_bar = fig.add_subplot(gs[2, 2])
+alive_sorted = sorted([t for t in macro.traditions if t.alive],
+                       key=lambda x: x.cd)
+names = [t.name for t in alive_sorted]
+cds = [t.cd for t in alive_sorted]
+colors = [t.color for t in alive_sorted]
+bars = ax_bar.barh(range(len(names)), cds, color=colors, alpha=0.85,
+                   edgecolor='white', linewidth=0.8)
+ax_bar.set_yticks(range(len(names)))
+ax_bar.set_yticklabels(names, fontsize=8)
+for i, (cd_val, t) in enumerate(zip(cds, alive_sorted)):
+    ax_bar.text(cd_val + 0.015, i, f'L{t.level} ({cd_val:.2f})',
+                va='center', fontsize=8, color='#cccccc')
+for xv, c in [(0.22, 'cyan'), (0.45, 'orange'), (0.70, 'red')]:
+    ax_bar.axvline(xv, color=c, alpha=0.35, ls='--')
+ax_bar.set(xlabel='Closure Degree',
+           title='B6 · Итоговый Closure Degree',
+           xlim=(0, 1.15))
+ax_bar.grid(True, alpha=0.2, axis='x')
+
+plt.show()
+print("\n>>> 9 графиков построены.")
+
+# ── Active Experimenter ──
+active_experimenter(macro)
+
+print("\n>>> Готово!")
