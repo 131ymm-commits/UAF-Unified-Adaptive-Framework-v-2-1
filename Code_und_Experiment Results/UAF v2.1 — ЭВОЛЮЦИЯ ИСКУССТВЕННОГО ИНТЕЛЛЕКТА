@@ -1,0 +1,232 @@
+# -*- coding: utf-8 -*-
+"""
+UAF v2.1 — ЭВОЛЮЦИЯ ИСКУССТВЕННОГО ИНТЕЛЛЕКТА (1950 - 2040)
+Моделирование смены парадигм ИИ и анализ "Зим ИИ" через замыкание контура.
+"""
+
+import numpy as np
+import matplotlib
+matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+import matplotlib.pyplot as plt
+from dataclasses import dataclass, field
+from typing import List, Dict
+
+# ── Настройки графики ──
+plt.rcParams.update({
+    'figure.facecolor': '#0a0a0f', 'axes.facecolor': '#12121a',
+    'axes.edgecolor': '#2a2a35', 'axes.labelcolor': '#cccccc',
+    'text.color': '#cccccc', 'xtick.color': '#888888',
+    'ytick.color': '#888888', 'grid.color': '#2a2a35',
+})
+
+# ── Структуры данных ──
+@dataclass
+class AI_Paradigm:
+    name: str
+    birth_year: int
+    color: str
+    base_s_growth: float
+    base_c_growth: float
+    base_i_growth: float
+    S: float = 0.01; C: float = 0.01; I: float = 0.01
+    alive: bool = False
+    hist_cd: list = field(default_factory=list)
+    hist_s: list = field(default_factory=list)
+    hist_c: list = field(default_factory=list)
+    hist_i: list = field(default_factory=list)
+
+    @property
+    def cd(self) -> float:
+        """Степень замыкания (Closure Degree) — геометрическое среднее S, C, I"""
+        return float(np.clip((self.S * self.C * self.I) ** (1/3), 0, 1))
+
+@dataclass
+class TPEvent:
+    year: int; name: str; level: int; description: str
+
+# ── Ядро Симуляции ──
+class AIEvolutionModel:
+    def __init__(self):
+        self.years = np.arange(1950, 2041, 1)
+        self.events: List[TPEvent] = []
+        self.global_level = 0
+        self.global_cd_hist = []
+        self.paradigms = [
+            AI_Paradigm("Symbolic AI (GOFAI)", 1955, "#00ffff", 0.08, 0.01, 0.06), # Высокие алгоритмы, нет железа
+            AI_Paradigm("Traditional ML",      1985, "#ff00ff", 0.04, 0.03, 0.04), # Баланс, но низкий потенциал
+            AI_Paradigm("Deep Learning",       2006, "#ff8800", 0.06, 0.09, 0.07), # Взрыв за счет GPU (C)
+            AI_Paradigm("Foundation Models",   2017, "#00ff66", 0.09, 0.12, 0.10)  # LLMs, трансформеры
+        ]
+
+    def _catalysts_and_winters(self, p: AI_Paradigm, y: int):
+        """Исторические шоки, Зимы ИИ и прорывы"""
+        n = p.name
+        
+        # Первая Зима ИИ (1974-1980)
+        if y == 1974 and "Symbolic" in n:
+            p.C *= 0.5  # Обвал финансирования (отчет Лайтхилла)
+            p.I *= 0.8
+            
+        # Вторая Зима ИИ (1987-1993)
+        if y == 1987 and "Symbolic" in n:
+            p.S *= 0.6; p.C *= 0.4 # Крах рынка LISP-машин
+            
+        # Эра Big Data и GPU
+        if y >= 2010 and "Deep" in n:
+            p.C += 0.05 * (1 - p.C) # Экспоненциальный рост Compute
+            
+        # Tipping Point: AlexNet (2012)
+        if y == 2012 and "Deep" in n:
+            p.S += 0.1; p.I += 0.1
+            
+        # Tipping Point: Transformer (2017)
+        if y == 2017 and "Foundation" in n:
+            p.S += 0.15; p.I += 0.1
+            
+        # Tipping Point: ChatGPT / RLHF (2022)
+        if y == 2022 and "Foundation" in n:
+            p.I += 0.2; p.C += 0.15
+
+    def run(self):
+        for y in self.years:
+            max_cd_current = 0
+            
+            for p in self.paradigms:
+                if y >= p.birth_year and not p.alive:
+                    p.alive = True
+                    p.S, p.C, p.I = 0.05, 0.01, 0.02
+                
+                if not p.alive:
+                    for h in [p.hist_cd, p.hist_s, p.hist_c, p.hist_i]: h.append(0)
+                    continue
+
+                # Логистический рост с учетом истощения парадигмы (saturation)
+                saturation = 1.0 - p.cd
+                
+                # Для Символьного ИИ жесткий предел из-за железа
+                if "Symbolic" in p.name and y > 1990: p.base_s_growth = 0.001
+                
+                p.S += p.base_s_growth * saturation * p.S * (1.1 if p.S > 0 else 0)
+                p.C += p.base_c_growth * saturation * p.C * (1.5 if y > 2000 else 0.8)
+                p.I += p.base_i_growth * saturation * p.I * (1.2 if p.S > 0.2 else 0.5)
+                
+                # Исторические интервенции
+                self._catalysts_and_winters(p, y)
+                
+                # Защита границ
+                p.S = np.clip(p.S, 0.01, 1.0)
+                p.C = np.clip(p.C, 0.01, 1.0)
+                p.I = np.clip(p.I, 0.01, 1.0)
+
+                # Запись метрик
+                cd = p.cd
+                max_cd_current = max(max_cd_current, cd)
+                p.hist_cd.append(cd); p.hist_s.append(p.S)
+                p.hist_c.append(p.C); p.hist_i.append(p.I)
+
+            self.global_cd_hist.append(max_cd_current)
+
+            # Проверка глобальных уровней (MultiLevel)
+            old_level = self.global_level
+            if max_cd_current >= 0.85 and self.global_level < 3: self.global_level = 3
+            elif max_cd_current >= 0.50 and self.global_level < 2: self.global_level = 2
+            elif max_cd_current >= 0.25 and self.global_level < 1: self.global_level = 1
+            
+            if self.global_level > old_level:
+                desc = {1: "L1: Pattern Rec. (DL Boom)", 
+                        2: "L2: GenAI & Reasoning", 
+                        3: "L3: Autonomous AGI"}[self.global_level]
+                self.events.append(TPEvent(y, "Global AI", self.global_level, desc))
+
+    def plot_results(self):
+        fig = plt.figure(figsize=(16, 12))
+        fig.suptitle('UAF: ЭВОЛЮЦИЯ ИСКУССТВЕННОГО ИНТЕЛЛЕКТА (1950 - 2040)', 
+                     fontsize=16, fontweight='bold', color='white', y=0.97)
+        
+        from matplotlib.gridspec import GridSpec
+        gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.2)
+
+        # ── 1. Closure Degree по парадигмам ──
+        ax1 = fig.add_subplot(gs[0, 0])
+        for p in self.paradigms:
+            ax1.plot(self.years, p.hist_cd, color=p.color, lw=2.5, label=p.name)
+        
+        ax1.axvspan(1974, 1980, color='blue', alpha=0.1)
+        ax1.text(1977, 0.5, '1-я\nЗима ИИ', color='#8888ff', ha='center', fontsize=8)
+        ax1.axvspan(1987, 1993, color='blue', alpha=0.1)
+        ax1.text(1990, 0.5, '2-я\nЗима ИИ', color='#8888ff', ha='center', fontsize=8)
+        
+        ax1.set(title='1 · Степень замыкания (Closure Degree) парадигм', xlim=(1950, 2040), ylim=(0, 1.05))
+        ax1.legend(loc='upper left', fontsize=9, framealpha=0.5)
+        ax1.grid(True, alpha=0.15)
+
+        # ── 2. Компоненты S, C, I: Анатомия краха и взлета ──
+        ax2 = fig.add_subplot(gs[0, 1])
+        gofai = self.paradigms[0]
+        llms = self.paradigms[3]
+        
+        ax2.plot(self.years, gofai.hist_s, color='#00ffff', ls='--', label='S (Algorithms) - Symbolic')
+        ax2.plot(self.years, gofai.hist_c, color='#ff0000', ls='--', label='C (Compute) - Symbolic')
+        
+        ax2.plot(self.years, llms.hist_s, color='#00ff66', lw=2, label='S (Transformers) - LLMs')
+        ax2.plot(self.years, llms.hist_c, color='#ff8800', lw=2, label='C (GPUs/TPUs) - LLMs')
+        
+        ax2.set(title='2 · S и C: Разрыв в GOFAI и Синергия в LLMs', xlim=(1950, 2040), ylim=(0, 1.05))
+        ax2.legend(loc='upper left', fontsize=8, framealpha=0.5)
+        ax2.grid(True, alpha=0.15)
+
+        # ── 3. MultiLevel Переходы системы ──
+        ax3 = fig.add_subplot(gs[1, 0])
+        ax3.plot(self.years, self.global_cd_hist, color='white', lw=3, label='Global Max CD')
+        
+        colors = {1: 'cyan', 2: 'orange', 3: 'red'}
+        for ev in self.events:
+            ax3.axvline(ev.year, color=colors[ev.level], ls='--', alpha=0.7)
+            ax3.text(ev.year + 2, 0.1 + ev.level*0.15, f"{ev.year}\n{ev.description}", 
+                     color=colors[ev.level], fontsize=9)
+            
+        ax3.axhspan(0, 0.25, color='gray', alpha=0.1)
+        ax3.axhspan(0.25, 0.50, color='cyan', alpha=0.1)
+        ax3.axhspan(0.50, 0.85, color='orange', alpha=0.1)
+        ax3.axhspan(0.85, 1.05, color='red', alpha=0.1)
+        
+        ax3.set(title='3 · Глобальные переходы ИИ (L0 → L3)', xlim=(1950, 2040), ylim=(0, 1.05))
+        ax3.grid(True, alpha=0.15)
+
+        # ── 4. Active Experimenter (Анализ бутылочных горлышек) ──
+        ax4 = fig.add_subplot(gs[1, 1])
+        ax4.axis('off')
+        
+        # Вычисляем текущий (последний) статус для LLMs
+        llm = self.paradigms[3]
+        s_val, c_val, i_val = llm.hist_s[-1], llm.hist_c[-1], llm.hist_i[-1]
+        
+        text = (
+            "4 · ACTIVE EXPERIMENTER: Путь к AGI (L3)\n\n"
+            f"Текущее состояние парадигмы 'Foundation Models' (2040):\n"
+            f"  Структура (S): {s_val:.2f} (Архитектуры)\n"
+            f"  Катализ (C):   {c_val:.2f} (Compute / Data)\n"
+            f"  Информация (I): {i_val:.2f} (Генерализация)\n\n"
+            "ДИАГНОСТИКА UAF:\n"
+            "В 1970-х Символьный ИИ потерпел крах из-за разрыва между\n"
+            "теорией (S) и вычислительной реальностью (C). \n"
+            "Сегодня (C) близко к пределу (нехватка энергии и данных).\n\n"
+            "РЕКОМЕНДАЦИЯ:\n"
+            "Для перехода на уровень L3 (Autonomous AGI) инвестиции\n"
+            "в Катализ (просто больше GPU) дадут убывающую отдачу.\n"
+            "Узким горлышком становится Информация (I) — потребность в\n"
+            "Grounding (воплощенный ИИ) и Neuro-Symbolic логике для\n"
+            "преодоления галлюцинаций."
+        )
+        ax4.text(0.0, 0.9, text, color='#ffcc00', fontsize=11, va='top', family='monospace')
+
+        plt.show()
+
+# ── Запуск ──
+def main():
+    model = AIEvolutionModel()
+    model.run()
+    model.plot_results()
+
+if __name__ == "__main__":
+    main()
