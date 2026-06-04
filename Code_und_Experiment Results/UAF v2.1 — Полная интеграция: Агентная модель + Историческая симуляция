@@ -1,0 +1,763 @@
+# -*- coding: utf-8 -*-
+"""
+UAF v2.1 — ПОЛНАЯ ИНТЕГРАЦИЯ
+Микроуровень (агенты) + Макроуровень (традиции) + Мета (взаимодействия)
+Colab-ready: numpy, matplotlib, random, dataclasses, typing
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import matplotlib.patches as mpatches
+from matplotlib.colors import LinearSegmentedColormap
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple, Optional
+import random
+
+# ══════════════════════════════════════════════════════════════════════
+# SEED & STYLE
+# ══════════════════════════════════════════════════════════════════════
+np.random.seed(42)
+random.seed(42)
+
+DARK = '#0e1117'
+PANEL = '#1a1d23'
+GRID  = '#2a2d33'
+TXT   = '#cccccc'
+DIM   = '#777777'
+
+plt.rcParams.update({
+    'figure.facecolor': DARK, 'axes.facecolor': PANEL,
+    'axes.edgecolor': GRID, 'axes.labelcolor': TXT,
+    'text.color': TXT, 'xtick.color': DIM, 'ytick.color': DIM,
+    'grid.color': GRID, 'legend.facecolor': PANEL,
+    'legend.edgecolor': '#444', 'font.family': 'monospace',
+})
+
+# ══════════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 0: КОНСТАНТЫ UAF
+# ══════════════════════════════════════════════════════════════════════
+TP_L1 = 0.22   # порог L0 → L1
+TP_L2 = 0.47   # порог L1 → L2
+TP_L3 = 0.70   # порог L2 → L3
+
+LEVEL_NAMES = {
+    0: 'L0 · Прото',
+    1: 'L1 · Культ',
+    2: 'L2 · Религия',
+    3: 'L3 · Система',
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 1: МИКРО — Агентная модель (ваша, оптимизированная)
+# ══════════════════════════════════════════════════════════════════════
+
+class MicroCommunity:
+    """
+    Локальная религиозная община: N агентов с убеждениями (теизм, ритуал).
+    Замкнутый AdaptiveLoop: взаимодействие → мутация → замер closure.
+    Выход: S, C, I → closure_degree для макроуровня.
+    """
+
+    def __init__(self, n: int = 200, name: str = ""):
+        self.n = n
+        self.name = name
+        # beliefs[i] = [теизм(0..1), ритуализм(0..1)]
+        self.beliefs = np.column_stack([
+            np.random.beta(2, 5, n),
+            np.random.beta(1, 4, n),
+        ])
+        self.hist_cd: List[float] = []
+        self.hist_S:  List[float] = []
+        self.hist_C:  List[float] = []
+        self.hist_I:  List[float] = []
+
+    # ── Вычисление S, C, I из распределения убеждений ──
+
+    def _compute_SCI(self) -> Tuple[float, float, float]:
+        b = self.beliefs
+
+        # S = Структура: насколько ритуалы унифицированы (низкая дисперсия ритуализма)
+        S = float(np.clip(1.0 - np.var(b[:, 1]) * 6.0, 0.0, 1.0))
+
+        # C = Катализ: плотность культурного обмена
+        #   ≈ доля пар агентов с близкими убеждениями (dist < 0.35)
+        idx = np.random.choice(self.n, min(400, self.n), replace=False)
+        sample = b[idx]
+        dists = np.linalg.norm(
+            sample[:, None, :] - sample[None, :, :], axis=-1
+        )
+        C = float(np.clip(np.mean(dists < 0.35) * 2.5, 0.0, 1.0))
+
+        # I = Информация: насколько теистический консенсус высок
+        mean_t = np.mean(b[:, 0])
+        var_t  = np.var(b[:, 0])
+        I = float(np.clip(mean_t * (1.0 - var_t * 8.0), 0.0, 1.0))
+
+        return S, C, I
+
+    @property
+    def closure_degree(self) -> float:
+        S, C, I = self._compute_SCI()
+        return float((S * C * I) ** (1 / 3))
+
+    # ── Один шаг эволюции общины ──
+
+    def step(self, catalysis_boost: float = 0.0,
+             info_boost: float = 0.0,
+             mutation_rate: float = 0.02):
+
+        n_pairs = self.n * 4
+
+        # Активный экспериментатор (реформатор/пророк)
+        experimenter = (
+            np.random.randint(self.n)
+            if random.random() < 0.04 else -1
+        )
+
+        # Взаимодействие
+        ii = np.random.randint(0, self.n, n_pairs)
+        jj = np.random.randint(0, self.n, n_pairs)
+        mask = ii != jj
+        ii, jj = ii[mask], jj[mask]
+
+        dists = np.linalg.norm(
+            self.beliefs[ii] - self.beliefs[jj], axis=1
+        )
+        close = dists < (0.4 + catalysis_boost * 0.2)
+
+        rate = 0.08 + catalysis_boost * 0.05
+        alpha = np.where(
+            (ii == experimenter) | (jj == experimenter), rate * 3, rate
+        )
+
+        for k in np.where(close)[0]:
+            i_, j_ = ii[k], jj[k]
+            a = alpha[k]
+            mid = (self.beliefs[i_] + self.beliefs[j_]) / 2
+            self.beliefs[i_] += a * (mid - self.beliefs[i_])
+            self.beliefs[j_] += a * (mid - self.beliefs[j_])
+
+        # Информационный буст (тексты, откровения)
+        if info_boost > 0:
+            self.beliefs[:, 0] += info_boost * 0.04 * np.random.randn(self.n)
+
+        # Мутация
+        mut = np.random.rand(self.n) < mutation_rate
+        self.beliefs[mut] += (np.random.rand(mut.sum(), 2) - 0.5) * 0.25
+        self.beliefs = np.clip(self.beliefs, 0.0, 1.0)
+
+        # Запись
+        S, C, I = self._compute_SCI()
+        cd = float((S * C * I) ** (1 / 3))
+        self.hist_cd.append(cd)
+        self.hist_S.append(S)
+        self.hist_C.append(C)
+        self.hist_I.append(I)
+
+    def run(self, steps: int, catalysis_boost: float = 0.0,
+            info_boost: float = 0.0):
+        for _ in range(steps):
+            self.step(catalysis_boost, info_boost)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 2: МАКРО — Историческая традиция
+# ══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class HistoricalTradition:
+    name:       str
+    birth:      int          # год рождения
+    color:      str
+    sg: float = 0.004        # structure growth rate
+    cg: float = 0.004        # catalysis growth rate
+    ig: float = 0.004        # information growth rate
+
+    # Состояние (инициализируется при активации)
+    S: float = 0.03
+    C: float = 0.03
+    I: float = 0.03
+    followers: float = 0.005
+    level: int = 0
+    alive: bool = False
+
+    # Микроуровень — локальная община
+    community: Optional[MicroCommunity] = field(default=None, repr=False)
+
+    # История
+    hist_cd:  List[float] = field(default_factory=list)
+    hist_S:   List[float] = field(default_factory=list)
+    hist_C:   List[float] = field(default_factory=list)
+    hist_I:   List[float] = field(default_factory=list)
+    hist_fol: List[float] = field(default_factory=list)
+    hist_lvl: List[int]   = field(default_factory=list)
+
+    @property
+    def cd(self) -> float:
+        return float(np.clip((self.S * self.C * self.I) ** (1 / 3), 0, 1))
+
+    def activate(self):
+        self.alive = True
+        self.S = 0.04 + random.uniform(0, 0.04)
+        self.C = 0.04 + random.uniform(0, 0.04)
+        self.I = 0.03 + random.uniform(0, 0.03)
+        self.followers = 0.005
+        self.community = MicroCommunity(n=150, name=self.name)
+
+    def check_level(self) -> Tuple[bool, int]:
+        old = self.level
+        c = self.cd
+        if   c >= TP_L3 and self.level < 3: self.level = 3
+        elif c >= TP_L2 and self.level < 2: self.level = 2
+        elif c >= TP_L1 and self.level < 1: self.level = 1
+        return (self.level > old, old)
+
+    def record(self):
+        self.hist_cd.append(self.cd)
+        self.hist_S.append(self.S)
+        self.hist_C.append(self.C)
+        self.hist_I.append(self.I)
+        self.hist_fol.append(self.followers)
+        self.hist_lvl.append(self.level)
+
+
+@dataclass
+class TPEvent:
+    year: int
+    name: str
+    old_level: int
+    new_level: int
+    cd: float
+
+
+# ══════════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 3: МЕТА — Движок симуляции
+# ══════════════════════════════════════════════════════════════════════
+
+class UAFSimulation:
+
+    def __init__(self):
+        self.t0, self.t1, self.dt = -3000, 2050, 10
+        self.years = list(range(self.t0, self.t1 + 1, self.dt))
+        self.events: List[TPEvent] = []
+        self.traditions = self._make_traditions()
+
+        # Мета-история: межтрадиционные потоки
+        self.meta_hist: List[Dict] = []
+
+    # ── Инициализация традиций ────────────────────────────────────
+
+    def _make_traditions(self) -> List[HistoricalTradition]:
+        return [
+            HistoricalTradition("Месопотамия",  -3000, "#DAA520", 0.0030, 0.0020, 0.0025),
+            HistoricalTradition("Индуизм",      -1500, "#FF6347", 0.0040, 0.0030, 0.0050),
+            HistoricalTradition("Иудаизм",      -1200, "#4488FF", 0.0050, 0.0028, 0.0070),
+            HistoricalTradition("Кит.мысль",     -600, "#FF4444", 0.0055, 0.0060, 0.0065),
+            HistoricalTradition("Буддизм",       -500, "#FFA500", 0.0060, 0.0065, 0.0055),
+            HistoricalTradition("Христианство",    30, "#00CC66", 0.0075, 0.0085, 0.0070),
+            HistoricalTradition("Ислам",          622, "#22BBAA", 0.0090, 0.0110, 0.0085),
+            HistoricalTradition("Наука",         1500, "#BB44FF", 0.0110, 0.0130, 0.0170),
+        ]
+
+    # ── Исторические события (каталитические инъекции) ───────────
+
+    def _inject(self, t: HistoricalTradition, y: int):
+        n = t.name
+
+        # Осевое время 800–200 до н.э.
+        if -800 <= y <= -200 and n in ["Индуизм", "Иудаизм", "Кит.мысль", "Буддизм"]:
+            t.C += 0.0030
+            t.I += 0.0040
+            if t.community:
+                t.community.step(catalysis_boost=0.3, info_boost=0.4)
+
+        # ── Месопотамия ──
+        if n == "Месопотамия":
+            if -2500 <= y <= -1500: t.S += 0.0025
+            if y > -500:
+                t.S *= 0.996; t.C *= 0.994
+            if y > 100:
+                t.followers = max(0.001, t.followers * 0.985)
+
+        # ── Индуизм ──
+        if n == "Индуизм":
+            if -600 <= y <= -200: t.I += 0.005
+            if 300 <= y <= 600:   t.S += 0.004
+
+        # ── Иудаизм ──
+        if n == "Иудаизм":
+            if y == -960: t.S += 0.07
+            if -500 <= y <= -400: t.I += 0.07
+            if y == 70: t.S *= 0.62; t.C += 0.05
+
+        # ── Буддизм ──
+        if n == "Буддизм":
+            if y == -260: t.C += 0.09; t.S += 0.06
+            if 50 <= y <= 500: t.C += 0.003
+
+        # ── Кит.мысль ──
+        if n == "Кит.мысль":
+            if y == -200: t.S += 0.08
+            if 600 <= y <= 900: t.C += 0.004
+
+        # ── Христианство ──
+        if n == "Христианство":
+            if 30 <= y <= 100: t.C += 0.020
+            if y == 310: t.S += 0.12; t.C += 0.06
+            if 325 <= y <= 500: t.I += 0.006
+            if y == 1054: t.S *= 0.93
+            if y == 1520: t.C += 0.05; t.I += 0.05
+            if 1500 <= y <= 1800: t.followers += 0.0012
+
+        # ── Ислам ──
+        if n == "Ислам":
+            if 622 <= y <= 660: t.C += 0.030; t.S += 0.022
+            if 700 <= y <= 900: t.I += 0.008; t.C += 0.004
+            if y == 1258: t.S *= 0.80
+
+        # ── Наука ──
+        if n == "Наука":
+            if y == 1500: t.I += 0.04
+            if y == 1690: t.I += 0.06; t.C += 0.04
+            if y == 1790: t.S += 0.06; t.C += 0.05
+            if y == 1860: t.I += 0.06
+            if 1900 <= y <= 2050:
+                t.S += 0.005; t.C += 0.006; t.I += 0.008
+
+    # ── Мета-взаимодействие: синкретизм ──────────────────────────
+
+    def _syncretism(self, y: int):
+        """
+        Традиции с высоким C передают информационный импульс соседям.
+        Исторически: эллинизм→христианство, ислам→наука (Возрождение).
+        """
+        alive = [t for t in self.traditions if t.alive]
+        high_C = [t for t in alive if t.C > 0.5]
+
+        sync_flow = 0.0
+        for donor in high_C:
+            for recv in alive:
+                if donor is recv:
+                    continue
+                # Только если эпохи пересекаются и донор зрелый
+                if donor.cd > 0.4 and recv.cd > 0.15:
+                    flow = donor.I * 0.0004 * recv.C
+                    recv.I += flow
+                    sync_flow += flow
+
+                    # Микроуровень: информационный буст общины-получателя
+                    if recv.community and random.random() < 0.1:
+                        recv.community.step(info_boost=0.2)
+
+        # Нормировка последователей (конкуренция)
+        total = sum(t.followers for t in alive)
+        if total > 1.0:
+            for t in alive:
+                t.followers /= (total * 1.015)
+
+        return sync_flow
+
+    # ── Основной цикл ─────────────────────────────────────────────
+
+    def run(self):
+        print("═" * 70)
+        print("  UAF v2.1  ·  ИНТЕГРИРОВАННАЯ СИМУЛЯЦИЯ")
+        print(f"  Период: {abs(self.t0)} до н.э. — {self.t1} н.э. | dt={self.dt} лет")
+        print("═" * 70)
+
+        micro_steps = 0
+
+        for y in self.years:
+            sync_flow = 0.0
+
+            for t in self.traditions:
+                # Активация при рождении
+                if y >= t.birth and not t.alive:
+                    t.activate()
+
+                if not t.alive:
+                    t.record()
+                    continue
+
+                # Рост S, C, I (логистический с шумом)
+                age = max(1, y - t.birth)
+                gm  = 1.0 / (1.0 + 7e-5 * age)
+
+                for attr, rate in [('S', t.sg), ('C', t.cg), ('I', t.ig)]:
+                    v  = getattr(t, attr)
+                    dv = (rate * gm + random.gauss(0, 0.0012)) * (1 - v * 0.22)
+                    setattr(t, attr, float(np.clip(v + dv, 0.01, 1.0)))
+
+                # Исторические инъекции
+                self._inject(t, y)
+                t.S = float(np.clip(t.S, 0.01, 1.0))
+                t.C = float(np.clip(t.C, 0.01, 1.0))
+                t.I = float(np.clip(t.I, 0.01, 1.0))
+
+                # Рост последователей
+                cd = t.cd
+                t.followers += cd * 0.0020 * (1 - t.followers) * (1 + t.level * 0.45)
+                t.followers = float(np.clip(t.followers, 0.001, 0.95))
+
+                # Tipping Point
+                crossed, old = t.check_level()
+                if crossed:
+                    self.events.append(TPEvent(y, t.name, old, t.level, cd))
+                    t.followers = min(0.95, t.followers * (1 + 0.28 * t.level))
+
+                # Микро-шаг (каждые 50 лет макро-шагов)
+                if t.community and random.random() < 0.2:
+                    t.community.step(
+                        catalysis_boost=t.C,
+                        info_boost=t.I * 0.3,
+                        mutation_rate=0.015 + t.cd * 0.01
+                    )
+                    micro_steps += 1
+
+                    # Обратная связь micro→macro
+                    micro_cd = t.community.closure_degree
+                    feedback = (micro_cd - 0.3) * 0.008
+                    if feedback > 0:
+                        t.S += feedback * 0.3
+                        t.C += feedback * 0.4
+                        t.I += feedback * 0.3
+
+                t.record()
+
+            # Мета: синкретизм
+            sync_flow = self._syncretism(y)
+            self.meta_hist.append({'year': y, 'sync': sync_flow})
+
+        print(f"\n  Микро-шагов выполнено: {micro_steps:,}")
+        self._print_report()
+
+    # ── Отчёт ────────────────────────────────────────────────────
+
+    def _print_report(self):
+        desc = {1: "Локальный культ", 2: "Орг. религия", 3: "Универс. система"}
+
+        print(f"\n📌 ТОЧКИ ПЕРЕХОДА (TippingPoints):")
+        print("─" * 70)
+        for e in sorted(self.events, key=lambda x: x.year):
+            yl = f"{abs(e.year)} до н.э." if e.year < 0 else f"{e.year} н.э."
+            print(f"  {yl:>14s} │ {e.name:<15s} │ "
+                  f"L{e.old_level}→L{e.new_level} │ "
+                  f"CD={e.cd:.3f} │ {desc.get(e.new_level,'')}")
+
+        print(f"\n📊 ФИНАЛ ({self.t1} н.э.):")
+        print("─" * 70)
+        for t in sorted(self.traditions,
+                        key=lambda x: x.cd, reverse=True):
+            if t.alive:
+                bar_s = "█" * int(t.S * 12)
+                bar_c = "█" * int(t.C * 12)
+                bar_i = "█" * int(t.I * 12)
+                print(f"  {t.name:<15s} CD={t.cd:.3f} L{t.level} "
+                      f"│S {bar_s:<12s}"
+                      f"│C {bar_c:<12s}"
+                      f"│I {bar_i:<12s}"
+                      f"│ Д={t.followers:.3f}")
+
+        # Active Experimenter — следующие эксперименты
+        print(f"\n🔬 ACTIVE EXPERIMENTER — предложения:")
+        print("─" * 70)
+        bottlenecks = []
+        for t in self.traditions:
+            if not t.alive:
+                continue
+            vals = {'S': t.S, 'C': t.C, 'I': t.I}
+            weak = min(vals, key=vals.get)
+            delta = max(vals.values()) - min(vals.values())
+            if delta > 0.12:
+                bottlenecks.append(
+                    f"  «{t.name}» — узкое горло: "
+                    f"{weak}={vals[weak]:.2f} "
+                    f"(Δ={delta:.2f}) → "
+                    f"усиление даст CD × {(1+delta*0.5):.2f}"
+                )
+        for b in bottlenecks:
+            print(b)
+
+        experiments = [
+            "  EXP-1: Убрать Осевое время → ожидаем задержку L2 на 400+ лет",
+            "  EXP-2: Удвоить INTERACTION_RATE → проверить ускорение синкретизма",
+            "  EXP-3: Добавить «Секулярный гуманизм» с birth=1789 → конкуренция с Наукой",
+            "  EXP-4: Ввести эпидемии (random death of agents) → устойчивость L3-систем",
+        ]
+        for e in experiments:
+            print(e)
+
+    # ══════════════════════════════════════════════════════════════
+    # ВИЗУАЛИЗАЦИЯ — 12 панелей
+    # ══════════════════════════════════════════════════════════════
+
+    def plot(self):
+        Y = self.years
+
+        fig = plt.figure(figsize=(22, 30), facecolor=DARK)
+        gs  = gridspec.GridSpec(
+            5, 3, figure=fig,
+            hspace=0.42, wspace=0.32,
+            top=0.96, bottom=0.03,
+            left=0.06, right=0.97
+        )
+
+        fig.suptitle(
+            'UAF v2.1  ·  КУЛЬТУРА И РЕЛИГИЯ  ·  ИНТЕГРИРОВАННАЯ СИМУЛЯЦИЯ',
+            fontsize=16, fontweight='bold', color='white', y=0.99
+        )
+
+        axes = [fig.add_subplot(gs[r, c])
+                for r in range(5) for c in range(3)]
+        for a in axes:
+            a.set_facecolor(PANEL)
+            a.tick_params(colors=DIM, labelsize=8)
+            for sp in a.spines.values():
+                sp.set_edgecolor(GRID)
+
+        # ── P1: Closure Degree всех традиций ──
+        ax = axes[0]
+        for t in self.traditions:
+            ax.plot(Y, t.hist_cd, color=t.color, lw=1.8,
+                    alpha=0.9, label=t.name)
+        for lv, yv, c in [(1, TP_L1, '#00ffff'),
+                           (2, TP_L2, '#ff9900'),
+                           (3, TP_L3, '#ff3333')]:
+            ax.axhline(yv, color=c, alpha=0.3, ls='--', lw=0.8)
+            ax.text(self.t1 + 40, yv, f'L{lv}',
+                    fontsize=7, color=c, va='center')
+        ax.axvspan(-800, -200, alpha=0.07, color='gold')
+        ax.text(-500, 0.02, 'Осевое\nвремя',
+                ha='center', fontsize=7, color='gold', style='italic')
+        ax.set(xlim=(self.t0, self.t1), ylim=(0, 1.05),
+               title='P1 · Closure Degree (геом. среднее S·C·I)',
+               xlabel='Год', ylabel='CD')
+        ax.legend(fontsize=6, ncol=2, framealpha=0.5, loc='upper left')
+        ax.grid(True, alpha=0.15)
+
+        # ── P2: Последователи ──
+        ax = axes[1]
+        for t in self.traditions:
+            ax.fill_between(Y, 0, t.hist_fol,
+                            color=t.color, alpha=0.18)
+            ax.plot(Y, t.hist_fol, color=t.color,
+                    lw=1.5, label=t.name)
+        ax.set(xlim=(self.t0, self.t1),
+               title='P2 · Доля последователей',
+               xlabel='Год', ylabel='Followers')
+        ax.legend(fontsize=6, ncol=2, framealpha=0.5, loc='upper left')
+        ax.grid(True, alpha=0.15)
+
+        # ── P3: MultiLevel transitions (водопад) ──
+        ax = axes[2]
+        for i, t in enumerate(self.traditions):
+            off   = i * 0.08
+            yvals = [l + off for l in t.hist_lvl]
+            ax.fill_between(Y, off, yvals,
+                            color=t.color, alpha=0.25, step='post')
+            ax.step(Y, yvals, color=t.color,
+                    lw=1.6, where='post', label=t.name)
+        ax.set(xlim=(self.t0, self.t1),
+               title='P3 · MultiLevel L0→L3',
+               xlabel='Год', ylabel='Уровень (со смещением)')
+        ax.legend(fontsize=6, ncol=2, framealpha=0.5, loc='upper left')
+        ax.grid(True, alpha=0.15)
+
+        # ── P4/P5: S-C-I декомпозиция: Христианство, Ислам ──
+        for ax_idx, tname, title_suf, xlim_ in [
+            (3, "Христианство", "Христианство", (-100, self.t1)),
+            (4, "Ислам",        "Ислам",         (500,  self.t1)),
+        ]:
+            ax = axes[ax_idx]
+            tr = next(t for t in self.traditions if t.name == tname)
+            ax.plot(Y, tr.hist_S, '#4488ff', lw=1.8, label='S Структура')
+            ax.plot(Y, tr.hist_C, '#ff4444', lw=1.8, label='C Катализ')
+            ax.plot(Y, tr.hist_I, '#44ff88', lw=1.8, label='I Информация')
+            ax.plot(Y, tr.hist_cd, '#ffffff', lw=2.2,
+                    ls='--', label='CD')
+            ax.set(xlim=xlim_, ylim=(0, 1.05),
+                   title=f'P{ax_idx+1} · S-C-I: {title_suf}',
+                   xlabel='Год', ylabel='Значение')
+            ax.legend(fontsize=7, framealpha=0.5)
+            ax.grid(True, alpha=0.15)
+
+        # ── P6: Карта TippingPoints ──
+        ax = axes[5]
+        mkr = {1: 'o', 2: 's', 3: '*'}
+        for e in self.events:
+            tr = next(t for t in self.traditions if t.name == e.name)
+            ax.scatter(e.year, e.cd,
+                       c=tr.color,
+                       s=80 + e.new_level * 90,
+                       marker=mkr.get(e.new_level, 'o'),
+                       edgecolors='white', lw=0.8, zorder=5)
+            ax.annotate(
+                f"{e.name[:8]}→L{e.new_level}",
+                (e.year, e.cd),
+                fontsize=5.5, color='#bbbbbb', rotation=30,
+                xytext=(5, 5), textcoords='offset points'
+            )
+        for lv, yv, c in [(1, TP_L1, '#00ffff'),
+                           (2, TP_L2, '#ff9900'),
+                           (3, TP_L3, '#ff3333')]:
+            ax.axhline(yv, color=c, alpha=0.3, ls='--')
+            ax.text(self.t1 + 40, yv, f'L{lv}',
+                    fontsize=7, color=c, va='center')
+        ax.set(xlim=(self.t0, self.t1), ylim=(0, 1.05),
+               title='P6 · Карта TippingPoints',
+               xlabel='Год', ylabel='CD при переходе')
+        ax.grid(True, alpha=0.15)
+
+        # ── P7: Микроуровень — динамика CD двух общин ──
+        ax = axes[6]
+        micro_shown = 0
+        for t in self.traditions:
+            if t.community and len(t.community.hist_cd) > 0:
+                steps_m = list(range(len(t.community.hist_cd)))
+                ax.plot(steps_m, t.community.hist_cd,
+                        color=t.color, lw=1.2, alpha=0.8,
+                        label=t.name)
+                micro_shown += 1
+        ax.axhline(0.5, color='white', alpha=0.2, ls='--')
+        ax.set(title='P7 · Микроуровень: CD общин',
+               xlabel='Микро-шаги', ylabel='CD (агентная модель)')
+        ax.legend(fontsize=6, ncol=2, framealpha=0.5, loc='upper left')
+        ax.grid(True, alpha=0.15)
+
+        # ── P8: S/C/I микроуровня (одна традиция) ──
+        ax = axes[7]
+        tr_m = next((t for t in self.traditions
+                     if t.community and len(t.community.hist_S) > 5), None)
+        if tr_m:
+            steps_m = list(range(len(tr_m.community.hist_S)))
+            ax.plot(steps_m, tr_m.community.hist_S,
+                    '#4488ff', lw=1.5, label='S')
+            ax.plot(steps_m, tr_m.community.hist_C,
+                    '#ff4444', lw=1.5, label='C')
+            ax.plot(steps_m, tr_m.community.hist_I,
+                    '#44ff88', lw=1.5, label='I')
+            ax.plot(steps_m, tr_m.community.hist_cd,
+                    '#ffffff', lw=2, ls='--', label='CD')
+            ax.set(title=f'P8 · Микро S-C-I: «{tr_m.name}»',
+                   xlabel='Микро-шаги', ylabel='Значение')
+            ax.legend(fontsize=7, framealpha=0.5)
+        ax.grid(True, alpha=0.15)
+
+        # ── P9: Синкретический поток ──
+        ax = axes[8]
+        sync_years = [m['year'] for m in self.meta_hist]
+        sync_vals  = [m['sync'] for m in self.meta_hist]
+        ax.fill_between(sync_years, 0, sync_vals,
+                        color='#cc66ff', alpha=0.4)
+        ax.plot(sync_years, sync_vals,
+                color='#cc66ff', lw=1.5)
+        ax.axvspan(-800, -200, alpha=0.07, color='gold')
+        ax.set(xlim=(self.t0, self.t1),
+               title='P9 · Межтрадиционный синкретический поток',
+               xlabel='Год', ylabel='Информационный трансфер')
+        ax.grid(True, alpha=0.15)
+
+        # ── P10: Фазовое пространство S–C (финал) ──
+        ax = axes[9]
+        ss  = np.linspace(0.01, 1.0, 300)
+        for cd_v, cl in [(TP_L1, '#00ffff'),
+                          (TP_L2, '#ff9900'),
+                          (TP_L3, '#ff3333')]:
+            for iv in [0.5, 0.8, 1.0]:
+                cc = cd_v ** 3 / (ss * iv + 1e-9)
+                cc = np.where(cc <= 1.0, cc, np.nan)
+                ax.plot(ss, cc, color=cl, alpha=0.12, lw=0.7)
+
+        for t in self.traditions:
+            if t.alive:
+                ax.scatter(t.S, t.C, s=t.I * 700 + 50,
+                           c=t.color, edgecolors='white',
+                           alpha=0.9, lw=1.2, zorder=5)
+                ax.annotate(t.name[:10], (t.S, t.C),
+                            fontsize=7, color=t.color,
+                            ha='center',
+                            xytext=(0, 10),
+                            textcoords='offset points')
+        ax.set(xlim=(0, 1.1), ylim=(0, 1.1),
+               title='P10 · Фазовое пространство S–C (размер=I)',
+               xlabel='Структура S', ylabel='Катализ C')
+        ax.grid(True, alpha=0.15)
+
+        # ── P11: Итоговый CD (гистограмма + уровни) ──
+        ax = axes[10]
+        alive_s = sorted([t for t in self.traditions if t.alive],
+                         key=lambda x: x.cd)
+        cds_f  = [t.cd for t in alive_s]
+        cols_f = [t.color for t in alive_s]
+        names_f = [t.name for t in alive_s]
+
+        bars = ax.barh(range(len(names_f)), cds_f,
+                       color=cols_f, alpha=0.82,
+                       edgecolor='white', linewidth=0.6)
+        ax.set_yticks(range(len(names_f)))
+        ax.set_yticklabels(names_f, fontsize=8)
+        for i, (cd_v, t) in enumerate(zip(cds_f, alive_s)):
+            ax.text(cd_v + 0.01, i,
+                    f'L{t.level} {cd_v:.3f}',
+                    va='center', fontsize=7.5, color=TXT)
+        for xv, c in [(TP_L1, '#00ffff'),
+                       (TP_L2, '#ff9900'),
+                       (TP_L3, '#ff3333')]:
+            ax.axvline(xv, color=c, alpha=0.3, ls='--')
+        ax.set(xlim=(0, 1.15),
+               title='P11 · Итоговый Closure Degree',
+               xlabel='CD')
+        ax.grid(True, alpha=0.15, axis='x')
+
+        # ── P12: Radar — финальный баланс S/C/I ──
+        ax12 = fig.add_subplot(gs[4, 2], polar=True)
+        ax12.set_facecolor(PANEL)
+        cats = ['S\nСтруктура', 'C\nКатализ', 'I\nИнформация']
+        N_cats = 3
+        angles = [n / N_cats * 2 * np.pi for n in range(N_cats)]
+        angles += angles[:1]
+
+        for t in sorted(self.traditions,
+                        key=lambda x: x.cd, reverse=True)[:5]:
+            if not t.alive:
+                continue
+            vals = [t.S, t.C, t.I, t.S]
+            ax12.plot(angles, vals, color=t.color,
+                      lw=1.5, alpha=0.8)
+            ax12.fill(angles, vals, color=t.color, alpha=0.08)
+
+        ax12.set_xticks(angles[:-1])
+        ax12.set_xticklabels(cats, size=8, color=TXT)
+        ax12.set_yticks([0.25, 0.50, 0.75, 1.0])
+        ax12.set_yticklabels(['0.25', '0.50', '0.75', '1.0'],
+                              size=6, color=DIM)
+        ax12.tick_params(colors=DIM)
+        ax12.set_title('P12 · Радар S-C-I (топ-5)',
+                       pad=15, fontsize=9, color=TXT)
+        ax12.spines['polar'].set_edgecolor(GRID)
+        ax12.yaxis.grid(True, color=GRID, alpha=0.4)
+        ax12.xaxis.grid(True, color=GRID, alpha=0.4)
+
+        patches = [mpatches.Patch(color=t.color, label=t.name)
+                   for t in sorted(self.traditions,
+                                   key=lambda x: x.cd,
+                                   reverse=True)[:5]
+                   if t.alive]
+        ax12.legend(handles=patches, fontsize=6,
+                    loc='upper right', bbox_to_anchor=(1.45, 1.15),
+                    framealpha=0.5)
+
+        plt.savefig('uaf_full_v21.png', dpi=140,
+                    bbox_inches='tight',
+                    facecolor=fig.get_facecolor())
+        plt.show()
+        print("\n✅ 12 панелей построены. Файл: uaf_full_v21.png")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ТОЧКА ВХОДА
+# ══════════════════════════════════════════════════════════════════════
+sim = UAFSimulation()
+sim.run()
+sim.plot()
