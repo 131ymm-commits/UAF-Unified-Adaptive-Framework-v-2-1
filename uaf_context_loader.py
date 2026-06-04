@@ -1,63 +1,44 @@
-```python
 #!/usr/bin/env python3
-"""
-UAF Context Loader — система автоматического внедрения контекста UAF в запросы к ИИ.
-
-Использование:
-    from uaf_context_loader import UAFContext
-    
-    ctx = UAFContext("Создать симуляцию рака")
-    print(ctx.prompt_for_gpt())      # Для ChatGPT
-    print(ctx.prompt_for_claude())   # Для Claude
-    print(ctx.prompt_for_any_llm())  # Универсальный
-"""
-
 import json
-from typing import Dict, Any, Optional
 
 class UAFContext:
-    """Контекст UAF для встраивания в любой запрос к ИИ."""
-    
     REPO_URL = "https://github.com/131ymm-commits/UAF-Unified-Adaptive-Framework-v-2-1"
     
-    # Минимальный контекст UAF (на русском, компактный)
-    UAF_CORE = {
-        "name": "Unified Adaptive Framework",
-        "version": "2.1",
-        "key_concepts": {
-            "AdaptiveLoop": (
-                "Замкнутый контур из трёх компонентов: "
-                "structural (структура), catalytic (катализ), informational (информация). "
-                "Замкнутость = closure_degree (0..1)."
-            ),
-            "TippingPoint": (
-                "Пороговый переход: когда closure_degree падает ниже порога, "
-                "система скачком меняет состояние (молодость → старость, здоровье → болезнь)."
-            ),
-            "MultiLevel": (
-                "L0 (молекулы) → L1 (клетки) → L2 (ткани) → L3 (организм). "
-                "Каждый уровень — AdaptiveLoop следующего порядка."
-            ),
-            "ActiveExperimenter": (
-                "Система выбора экспериментов на основе информационного выигрыша. "
-                "Система сама предлагает, что проверить дальше."
-            ),
-        },
-        "repo": REPO_URL,
-    }
-    
-    def __init__(self, task: str, format_type: str = "code_with_description"):
+    def __init__(self, task: str):
         self.task = task
-        self.format_type = format_type
-        self.context_json = json.dumps(self.UAF_CORE, ensure_ascii=False, indent=2)
     
-    def prompt_for_gpt(self) -> str:
-        """Промпт для ChatGPT/GPT-4."""
-        return f"""
-# Контекст: Unified Adaptive Framework
+    def prompt_for_any_llm(self) -> str:
+        return f"""@UAF_CONTEXT
 
-Ты работаешь с научной теорией **Unified Adaptive Framework (UAF)**. 
-Вот её ключевые концепции (JSON):
+FRAMEWORK: Unified Adaptive Framework v2.1
+REPO: {self.REPO_URL}
 
-```json
-{self.context_json}
+KEY_CONCEPTS:
+AdaptiveLoop = closed loop (structure + catalysis + information)
+closure_degree (0..1)
+TippingPoint = threshold transition
+MultiLevel = L0→L1→L2→L3
+
+TASK: {self.task}
+
+OUTPUT_FORMAT (exactly 7 sections, in Russian for explanations, code in Python):
+1. Что это? (2-3 paragraphs)
+2. Гипотеза UAF (AdaptiveLoop, TippingPoint, Prediction)
+3. Код (complete, no errors, only numpy/matplotlib/random, Colab-ready)
+4. Инструкция запуска
+5. Результаты (example output)
+6. Что получилось? (findings)
+7. Почему это UAF? (closure_degree, tipping point)
+"""
+
+def main():
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python uaf_context_loader.py 'Your task description'")
+        sys.exit(1)
+    task = sys.argv[1]
+    ctx = UAFContext(task)
+    print(ctx.prompt_for_any_llm())
+
+if __name__ == "__main__":
+    main()
