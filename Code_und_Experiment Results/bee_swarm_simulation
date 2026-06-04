@@ -1,0 +1,309 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+from dataclasses import dataclass, field
+import time
+from IPython.display import display, clear_output, HTML
+
+# Для более динамичной анимации в Colab
+import matplotlib.animation as animation
+
+# Increase the animation embedding limit
+plt.rcParams['animation.embed_limit'] = 50.0 # Set to 50 MB
+
+# --- Константы симуляции ---
+WORLD_SIZE = 100
+NUM_BEES = 10
+NUM_FOOD_SOURCES = 3
+FOOD_QUANTITY_RANGE = (50, 150) # Диапазон количества еды на источнике
+BEE_SPEED = 1 # Скорость пчелы
+DETECTION_RADIUS = 5 # Радиус обнаружения пищи
+COMMUNICATION_RADIUS = 15 # Радиус, в котором пчелы делятся информацией ('танцуют')
+HIVE_LOCATION = np.array([WORLD_SIZE / 2, WORLD_SIZE / 2]) # Расположение улья
+FOOD_COLLECTION_RATE = 5 # Сколько еды пчела собирает за один раз
+SIMULATION_STEPS = 500
+AREA_RESTRICTED_SEARCH_DURATION = 20 # Сколько шагов пчела ищет в ограниченной области
+
+@dataclass
+class FoodSource:
+    position: np.ndarray
+    quantity: float
+    original_quantity: float = field(init=False)
+    quality: float = field(init=False) # Добавляем атрибут качества (например, концентрация нектара)
+
+    def __post_init__(self):
+        self.original_quantity = self.quantity
+        # Инициализируем качество на основе начального количества, можно сделать случайным
+        self.quality = self.quantity / 100.0 # Пример: качество 0.5-1.5 для количества 50-150
+
+    def is_depleted(self) -> bool:
+        return self.quantity <= 0
+
+    def collect_food(self, amount: float) -> float:
+        collected = min(amount, self.quantity)
+        self.quantity -= collected
+        # Качество источника может уменьшаться по мере истощения
+        if self.original_quantity > 0:
+            self.quality = self.quantity / self.original_quantity
+        else:
+            self.quality = 0.0
+        return collected
+
+@dataclass
+class Bee:
+    id: int
+    position: np.ndarray
+    state: str = 'searching' # 'searching', 'going_to_food_source', 'going_to_communicated_location', 'searching_communicated_area', 'area_restricted_searching', 'returning_to_hive', 'dancing'
+    food_carried: float = 0
+    target_food_source: FoodSource = None # Used when bee detects food directly
+    target_location: np.ndarray = field(default_factory=lambda: np.array([0.,0.])) # Used when bee is recruited
+    target_communicated_quality: float = 0.0 # Quality of food at target_location
+    dancing_timer: int = 0 # Таймер для танца
+    trail: list = field(default_factory=list) # Для отслеживания пути
+    search_direction: np.ndarray = field(default_factory=lambda: (np.random.rand(2) * 2 - 1)) # Направление поиска для более умного блуждания
+    search_turn_rate: float = 0.1 # Насколько сильно пчела поворачивает при поиске
+    area_restricted_search_timer: int = 0 # Таймер для поиска в ограниченной области
+    # Информация о найденном источнике для танца
+    found_food_info: dict = field(default_factory=dict)
+
+    def move(self):
+        self.trail.append(self.position.copy())
+        if len(self.trail) > 20: # Ограничиваем длину следа для читаемости
+            self.trail.pop(0)
+
+        if self.state == 'searching':
+            # Более структурированный поиск (например, спиралевидный или зигзагообразный)
+            # Случайное изменение направления с небольшим поворотом
+            angle_change = (np.random.rand() * 2 - 1) * self.search_turn_rate # Небольшое случайное изменение угла
+            rotation_matrix = np.array([
+                [np.cos(angle_change), -np.sin(angle_change)],
+                [np.sin(angle_change), np.cos(angle_change)]
+            ])
+            self.search_direction = rotation_matrix @ self.search_direction
+            self.search_direction = self.search_direction / np.linalg.norm(self.search_direction) # Нормализация
+
+            self.position += self.search_direction * BEE_SPEED
+
+        elif self.state == 'going_to_food_source' and self.target_food_source and not self.target_food_source.is_depleted():
+            # Движение к цели (конкретному источнику пищи)
+            direction = self.target_food_source.position - self.position
+            distance = np.linalg.norm(direction)
+            if distance > BEE_SPEED: # Если еще не достигли цели
+                self.position += (direction / distance) * BEE_SPEED
+            else:
+                self.position = self.target_food_source.position.copy() # Достигли цели
+                self.state = 'area_restricted_searching' # Переход в состояние ограниченного поиска
+                self.area_restricted_search_timer = AREA_RESTRICTED_SEARCH_DURATION
+
+        elif self.state == 'going_to_communicated_location':
+            # Движение к месту, указанному танцующей пчелой
+            direction = self.target_location - self.position
+            distance = np.linalg.norm(direction)
+            if distance > BEE_SPEED:
+                self.position += (direction / distance) * BEE_SPEED
+            else:
+                self.position = self.target_location.copy() # Достигли примерной локации
+                # Теперь пчела должна начать искать еду в этой области
+                self.state = 'searching_communicated_area' # Transition to localized search
+                self.area_restricted_search_timer = AREA_RESTRICTED_SEARCH_DURATION # Use this timer for area search too
+
+        elif self.state == 'searching_communicated_area':
+            # Perform a localized search in the communicated area
+            # This is similar to 'searching' but with higher turn rate or smaller steps
+            angle_change = (np.random.rand() * 2 - 1) * (self.search_turn_rate * 2) # More active turning
+            rotation_matrix = np.array([
+                [np.cos(angle_change), -np.sin(angle_change)],
+                [np.sin(angle_change), np.cos(angle_change)]
+            ])
+            self.search_direction = rotation_matrix @ self.search_direction
+            self.search_direction = self.search_direction / np.linalg.norm(self.search_direction) # Normalization
+
+            self.position += self.search_direction * (BEE_SPEED * 0.7) # Slightly slower movement
+
+            self.area_restricted_search_timer -= 1
+            if self.area_restricted_search_timer <= 0: # If timer runs out without finding food
+                self.state = 'searching' # Go back to general searching
+                self.search_direction = (np.random.rand(2) * 2 - 1) # Reset search direction
+                self.search_direction = self.search_direction / np.linalg.norm(self.search_direction)
+
+        elif self.state == 'area_restricted_searching':
+            if self.target_food_source and not self.target_food_source.is_depleted():
+                # Собираем еду
+                collected = self.target_food_source.collect_food(FOOD_COLLECTION_RATE)
+                self.food_carried += collected
+
+                # Пчела кружит вокруг источника, пока не соберет достаточно или таймер не истечет
+                angle_change = (np.random.rand() * 2 - 1) * 0.5 # Более активное случайное изменение угла вокруг источника
+                rotation_matrix = np.array([
+                    [np.cos(angle_change), -np.sin(angle_change)],
+                    [np.sin(angle_change), np.cos(angle_change)]
+                ])
+                self.search_direction = rotation_matrix @ self.search_direction
+                self.search_direction = self.search_direction / np.linalg.norm(self.search_direction)
+                self.position += self.search_direction * (BEE_SPEED * 0.5) # Немного медленнее движение
+
+                self.area_restricted_search_timer -= 1
+                if self.area_restricted_search_timer <= 0 or self.food_carried >= FOOD_COLLECTION_RATE * 2 or self.target_food_source.is_depleted():
+                    self.state = 'returning_to_hive'
+                    # Сохраняем информацию о найденном источнике для танца
+                    distance_to_hive = np.linalg.norm(self.target_food_source.position - HIVE_LOCATION)
+                    direction_to_hive = (self.target_food_source.position - HIVE_LOCATION) / distance_to_hive if distance_to_hive > 0 else np.array([0.,0.])
+                    self.found_food_info = {
+                        'position': self.target_food_source.position.copy(),
+                        'quality': self.target_food_source.quality, # Используем новую метрику качества
+                        'distance': distance_to_hive,
+                        'direction': direction_to_hive # Вектор от улья к еде
+                    }
+            else:
+                self.state = 'returning_to_hive' # Источник истощился, возвращаемся
+
+        elif self.state == 'returning_to_hive':
+            direction = HIVE_LOCATION - self.position
+            distance = np.linalg.norm(direction)
+            if distance > BEE_SPEED:
+                self.position += (direction / distance) * BEE_SPEED
+            else:
+                self.position = HIVE_LOCATION.copy() # Достигли улья
+                self.food_carried = 0 # Сгрузили еду
+                if self.found_food_info and self.found_food_info['quality'] > 0.1: # Танцуем только за хорошее качество
+                    self.state = 'dancing'
+                    # Длительность танца пропорциональна качеству и/или расстоянию
+                    self.dancing_timer = int(10 + self.found_food_info['quality'] * 20 + self.found_food_info['distance'] / 10)
+                else:
+                    self.state = 'searching' # Если нет хорошей информации или источник исчерпан, снова ищем
+                    self.search_direction = (np.random.rand(2) * 2 - 1) # Сброс направления поиска для новой фазы
+                    self.search_direction = self.search_direction / np.linalg.norm(self.search_direction)
+
+        elif self.state == 'dancing':
+            self.dancing_timer -= 1
+            if self.dancing_timer <= 0:
+                self.state = 'searching' # Закончили танец, снова ищем
+                self.search_direction = (np.random.rand(2) * 2 - 1) # Сброс направления поиска для новой фазы
+                self.search_direction = self.search_direction / np.linalg.norm(self.search_direction)
+                self.found_food_info = {} # Сбросить информацию о танце
+
+        # Ограничение движения в пределах мира и отскок от границ
+        if not (0 <= self.position[0] <= WORLD_SIZE):
+            self.position[0] = np.clip(self.position[0], 0, WORLD_SIZE)
+            self.search_direction[0] *= -1 # Отскок
+        if not (0 <= self.position[1] <= WORLD_SIZE):
+            self.position[1] = np.clip(self.position[1], 0, WORLD_SIZE)
+            self.search_direction[1] *= -1 # Отскок
+
+
+class SwarmSimulation:
+    def __init__(self):
+        self.bees = [
+            Bee(id=i, position=np.random.rand(2) * WORLD_SIZE)
+            for i in range(NUM_BEES)
+        ]
+        self.food_sources = [
+            FoodSource(position=np.random.rand(2) * WORLD_SIZE, quantity=random.randint(*FOOD_QUANTITY_RANGE))
+            for _ in range(NUM_FOOD_SOURCES)
+        ]
+        # Фигуры для визуализации
+        self.fig, self.ax = plt.subplots(figsize=(8, 8))
+        self.ax.set_xlim(0, WORLD_SIZE)
+        self.ax.set_ylim(0, WORLD_SIZE)
+        self.ax.set_aspect('equal')
+        self.ax.set_title('Симуляция роя пчел')
+
+        # Визуализация улья
+        self.ax.plot(HIVE_LOCATION[0], HIVE_LOCATION[1], 's', color='orange', markersize=10, label='Улей')
+
+        # Инициализация scatters и trails
+        self.bee_scatters = self.ax.plot([], [], 'o', color='blue', markersize=5, label='Пчелы')[0]
+        self.food_scatters = self.ax.plot([], [], 'X', color='green', markersize=8, label='Еда')[0]
+        self.food_depleted_scatters = self.ax.plot([], [], 'X', color='gray', markersize=8, label='Исчерпана')[0]
+        self.trails = [self.ax.plot([], [], '-', color='lightblue', alpha=0.5)[0] for _ in range(NUM_BEES)]
+
+        # Легенда
+        self.ax.legend()
+
+    def update(self, frame):
+        # Обновление состояния пчел
+        for bee in self.bees:
+            # Поиск еды (только если пчела ищет)
+            if bee.state == 'searching' or bee.state == 'searching_communicated_area': # Check for food if searching or in communicated area
+                best_food_source = None
+                max_quality = -1
+
+                # Пчелы ищут еду сами
+                for food in self.food_sources:
+                    if not food.is_depleted():
+                        distance = np.linalg.norm(bee.position - food.position)
+                        if distance < DETECTION_RADIUS:
+                            if food.quality > max_quality: # Предпочитаем более качественную еду
+                                max_quality = food.quality
+                                best_food_source = food
+                if best_food_source:
+                    bee.target_food_source = best_food_source
+                    bee.state = 'going_to_food_source'
+
+            # Или получают информацию от танцующих пчел (only if bee is searching)
+            if bee.state == 'searching':
+                for dancing_bee in self.bees:
+                    if dancing_bee.state == 'dancing' and dancing_bee.found_food_info:
+                        distance_to_dancer = np.linalg.norm(bee.position - dancing_bee.position)
+                        if distance_to_dancer < COMMUNICATION_RADIUS:
+                            # Check if the food source from the dancing bee is actually better or if the current bee has no target
+                            # Compare with target_food_source quality if available, or target_communicated_quality
+                            current_target_quality = 0.0
+                            if bee.target_food_source:
+                                current_target_quality = bee.target_food_source.quality
+                            elif bee.state == 'going_to_communicated_location' or bee.state == 'searching_communicated_area':
+                                current_target_quality = bee.target_communicated_quality
+
+                            if current_target_quality == 0.0 or dancing_bee.found_food_info['quality'] > current_target_quality:
+                                # Calculate the target location based on communicated direction and distance from the hive
+                                communicated_direction_vec = dancing_bee.found_food_info['direction']
+                                communicated_distance = dancing_bee.found_food_info['distance']
+
+                                # The target location is HIVE_LOCATION + (direction_vector * distance)
+                                bee.target_location = HIVE_LOCATION + communicated_direction_vec * communicated_distance
+                                bee.target_communicated_quality = dancing_bee.found_food_info['quality']
+                                bee.target_food_source = None # Reset direct food source target
+                                bee.state = 'going_to_communicated_location'
+                                break # Accepted information, stop looking for other dancers
+
+            bee.move()
+
+        # Обновление визуализации
+        bee_positions = np.array([b.position for b in self.bees])
+        if len(bee_positions) > 0:
+            self.bee_scatters.set_data(bee_positions[:, 0], bee_positions[:, 1])
+
+        active_food_positions = np.array([f.position for f in self.food_sources if not f.is_depleted()])
+        if len(active_food_positions) > 0:
+            self.food_scatters.set_data(active_food_positions[:, 0], active_food_positions[:, 1])
+        else:
+            self.food_scatters.set_data([],[])
+
+        depleted_food_positions = np.array([f.position for f in self.food_sources if f.is_depleted()])
+        if len(depleted_food_positions) > 0:
+            self.food_depleted_scatters.set_data(depleted_food_positions[:, 0], depleted_food_positions[:, 1])
+        else:
+            self.food_depleted_scatters.set_data([],[])
+
+        for i, bee in enumerate(self.bees):
+            if bee.trail:
+                trail_points = np.array(bee.trail)
+                self.trails[i].set_data(trail_points[:, 0], trail_points[:, 1])
+            else:
+                self.trails[i].set_data([],[])
+
+        self.ax.set_title(f'Симуляция роя пчел (Шаг: {frame}/{SIMULATION_STEPS})')
+        return [self.bee_scatters, self.food_scatters, self.food_depleted_scatters] + self.trails
+
+    def run_animation(self):
+        # Use FuncAnimation for more robust and less output-intensive animation in Colab
+        ani = animation.FuncAnimation(self.fig, self.update, frames=SIMULATION_STEPS, blit=True, interval=10)
+
+        # Display the animation as an HTML5 video
+        display(HTML(ani.to_jshtml()))
+
+        plt.close(self.fig) # Close the figure after animation is displayed
+
+# Запуск симуляции
+sim = SwarmSimulation()
+sim.run_animation()
