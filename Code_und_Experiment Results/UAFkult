@@ -1,0 +1,324 @@
+# -*- coding: utf-8 -*-
+"""
+UAF-анализ эволюции культуры и религии
+Модель: AdaptiveLoop с TippingPoint и MultiLevel переходами
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
+
+# ========== ПАРАМЕТРЫ МОДЕЛИ ==========
+N_AGENTS = 500          # количество агентов (носителей культурных паттернов)
+N_STEPS = 300           # количество поколений/итераций
+CLOSURE_THRESHOLD = 0.65  # порог замыкания для TippingPoint (0..1)
+MUTATION_RATE = 0.02    # вероятность мутации убеждений
+INTERACTION_RATE = 0.1  # вероятность взаимодействия между агентами
+LEARNING_RATE = 0.05    # скорость усвоения чужих паттернов
+EXPERIMENTER_PROB = 0.05 # вероятность активного экспериментатора на шаге
+
+# Пространство убеждений: [теизм, ритуализм]
+# теизм: 0=анимизм, 1=монотеизм
+# ритуализм: 0=минимальный, 1=максимальный
+
+@dataclass
+class Agent:
+    """Агент с культурно-религиозными убеждениями"""
+    beliefs: np.ndarray  # [теизм, ритуализм]
+    is_experimenter: bool = False
+    
+    def mutate(self):
+        """Мутация: случайное изменение убеждений"""
+        if random.random() < MUTATION_RATE:
+            # Случайное смещение в пространстве убеждений
+            shift = (np.random.rand(2) - 0.5) * 0.3
+            self.beliefs = np.clip(self.beliefs + shift, 0, 1)
+    
+    def interact(self, other: 'Agent'):
+        """Взаимодействие: усвоение чужих паттернов"""
+        if random.random() < INTERACTION_RATE:
+            distance = np.linalg.norm(self.beliefs - other.beliefs)
+            if distance < 0.4:  # близкие убеждения
+                # Сдвиг к среднему
+                mean_belief = (self.beliefs + other.beliefs) / 2
+                self.beliefs = self.beliefs * (1 - LEARNING_RATE) + mean_belief * LEARNING_RATE
+                self.beliefs = np.clip(self.beliefs, 0, 1)
+
+class CultureReligionSystem:
+    """Система культуры и религии как AdaptiveLoop"""
+    
+    def __init__(self, n_agents: int):
+        self.agents: List[Agent] = []
+        self.history: List[dict] = []
+        self.tipping_points: List[int] = []
+        self._initialize_agents(n_agents)
+    
+    def _initialize_agents(self, n: int):
+        """Инициализация начального распределения убеждений"""
+        # L0: анимизм + минимальный ритуализм
+        for _ in range(n):
+            beliefs = np.array([
+                np.random.beta(2, 5),  # теизм: смещение к анимизму
+                np.random.beta(1, 4)   # ритуализм: смещение к минимальному
+            ])
+            self.agents.append(Agent(beliefs))
+    
+    def calculate_closure_degree(self) -> float:
+        """Вычисление степени замыкания системы (0..1)"""
+        beliefs = np.array([a.beliefs for a in self.agents])
+        
+        # 1. Консенсус по теизму (среднее + низкая дисперсия)
+        mean_theism = np.mean(beliefs[:, 0])
+        var_theism = np.var(beliefs[:, 0])
+        consensus_theism = 1 - min(var_theism * 10, 1)  # нормализация
+        
+        # 2. Консенсус по ритуализму
+        mean_ritual = np.mean(beliefs[:, 1])
+        var_ritual = np.var(beliefs[:, 1])
+        consensus_ritual = 1 - min(var_ritual * 10, 1)
+        
+        # 3. Структурная целостность (коэффициент вариации по всем убеждениям)
+        overall_var = np.var(beliefs)
+        structural_integrity = 1 - min(overall_var * 5, 1)
+        
+        # Взвешенная сумма
+        closure = (consensus_theism * 0.4 + 
+                   consensus_ritual * 0.3 + 
+                   structural_integrity * 0.3)
+        return max(0, min(1, closure))
+    
+    def get_current_level(self) -> int:
+        """Определение текущего уровня MultiLevel (0-3)"""
+        beliefs = np.array([a.beliefs for a in self.agents])
+        mean_theism = np.mean(beliefs[:, 0])
+        mean_ritual = np.mean(beliefs[:, 1])
+        
+        # Пороги уровней
+        if mean_theism < 0.3 and mean_ritual < 0.3:
+            return 0  # L0: анимизм + минимальный ритуализм
+        elif 0.3 <= mean_theism < 0.6 and mean_ritual < 0.4:
+            return 1  # L1: политеизм + ритуализм
+        elif 0.6 <= mean_theism < 0.8 and 0.4 <= mean_ritual < 0.7:
+            return 2  # L2: монотеизм + этический ритуализм
+        elif mean_theism >= 0.8 and mean_ritual >= 0.7:
+            return 3  # L3: монотеизм + сложная ритуальная система
+        else:
+            return -1  # переходное состояние
+    
+    def step(self, step_num: int):
+        """Один шаг эволюции системы"""
+        # 1. Выбор активного экспериментатора (если есть)
+        experimenter_idx = None
+        if random.random() < EXPERIMENTER_PROB:
+            experimenter_idx = random.randint(0, len(self.agents) - 1)
+            self.agents[experimenter_idx].is_experimenter = True
+        
+        # 2. Взаимодействия между агентами
+        for i in range(len(self.agents)):
+            for j in range(i + 1, len(self.agents)):
+                if experimenter_idx is not None and (i == experimenter_idx or j == experimenter_idx):
+                    # Активный экспериментатор инициирует больше взаимодействий
+                    if random.random() < INTERACTION_RATE * 3:
+                        self.agents[i].interact(self.agents[j])
+                        self.agents[j].interact(self.agents[i])
+                else:
+                    self.agents[i].interact(self.agents[j])
+        
+        # 3. Мутации (особенно у экспериментаторов)
+        for i, agent in enumerate(self.agents):
+            if experimenter_idx is not None and i == experimenter_idx:
+                agent.mutate()  # экспериментатор мутирует с повышенной вероятностью
+            else:
+                if random.random() < MUTATION_RATE * 0.5:
+                    agent.mutate()
+        
+        # 4. Сбор статистики
+        beliefs = np.array([a.beliefs for a in self.agents])
+        closure = self.calculate_closure_degree()
+        level = self.get_current_level()
+        
+        # 5. Проверка TippingPoint
+        if closure >= CLOSURE_THRESHOLD and step_num > 10:
+            if len(self.tipping_points) == 0 or step_num - self.tipping_points[-1] > 20:
+                self.tipping_points.append(step_num)
+        
+        self.history.append({
+            'step': step_num,
+            'mean_theism': np.mean(beliefs[:, 0]),
+            'mean_ritual': np.mean(beliefs[:, 1]),
+            'var_theism': np.var(beliefs[:, 0]),
+            'var_ritual': np.var(beliefs[:, 1]),
+            'closure': closure,
+            'level': level,
+            'experimenter_active': experimenter_idx is not None
+        })
+    
+    def run(self):
+        """Запуск полной симуляции"""
+        for step in range(N_STEPS):
+            self.step(step)
+
+# ========== ВИЗУАЛИЗАЦИЯ ==========
+def plot_results(system: CultureReligionSystem):
+    """Построение графиков результатов"""
+    steps = [h['step'] for h in system.history]
+    mean_theism = [h['mean_theism'] for h in system.history]
+    mean_ritual = [h['mean_ritual'] for h in system.history]
+    closure = [h['closure'] for h in system.history]
+    levels = [h['level'] for h in system.history]
+    
+    fig, axes = plt.subplots(3, 2, figsize=(14, 10))
+    fig.suptitle('UAF-анализ эволюции культуры и религии', fontsize=16)
+    
+    # 1. Эволюция убеждений
+    ax1 = axes[0, 0]
+    ax1.plot(steps, mean_theism, 'b-', label='Теизм (анимизм→монотеизм)')
+    ax1.plot(steps, mean_ritual, 'r-', label='Ритуализм')
+    ax1.axhline(y=0.3, color='b', linestyle='--', alpha=0.3)
+    ax1.axhline(y=0.6, color='b', linestyle='--', alpha=0.3)
+    ax1.axhline(y=0.8, color='b', linestyle='--', alpha=0.3)
+    ax1.axhline(y=0.4, color='r', linestyle='--', alpha=0.3)
+    ax1.axhline(y=0.7, color='r', linestyle='--', alpha=0.3)
+    ax1.set_ylabel('Уровень убеждений (0-1)')
+    ax1.set_title('Динамика средних убеждений')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Степень замыкания (closure_degree)
+    ax2 = axes[0, 1]
+    ax2.plot(steps, closure, 'g-', linewidth=2)
+    ax2.axhline(y=CLOSURE_THRESHOLD, color='r', linestyle='--', 
+                label=f'Порог TippingPoint ({CLOSURE_THRESHOLD})')
+    ax2.fill_between(steps, 0, CLOSURE_THRESHOLD, alpha=0.1, color='red')
+    ax2.fill_between(steps, CLOSURE_THRESHOLD, 1, alpha=0.1, color='green')
+    ax2.set_ylabel('Степень замыкания')
+    ax2.set_title('AdaptiveLoop: closure_degree')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(0, 1)
+    
+    # 3. Уровни MultiLevel
+    ax3 = axes[1, 0]
+    level_colors = {0: 'brown', 1: 'orange', 2: 'green', 3: 'blue', -1: 'gray'}
+    for lvl in [-1, 0, 1, 2, 3]:
+        points = [i for i, l in enumerate(levels) if l == lvl]
+        if points:
+            ax3.scatter([steps[p] for p in points], 
+                       [lvl] * len(points), 
+                       color=level_colors[lvl], 
+                       label=f'L{lvl}' if lvl >= 0 else 'Переход',
+                       s=20, alpha=0.7)
+    ax3.set_yticks([-1, 0, 1, 2, 3])
+    ax3.set_yticklabels(['Переход', 'L0', 'L1', 'L2', 'L3'])
+    ax3.set_ylabel('Уровень эволюции')
+    ax3.set_title('MultiLevel переходы')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. TippingPoints
+    ax4 = axes[1, 1]
+    ax4.plot(steps, closure, 'g-', alpha=0.5)
+    for tp in system.tipping_points:
+        ax4.axvline(x=tp, color='red', linestyle='--', alpha=0.7, 
+                    label=f'TippingPoint на шаге {tp}' if tp == system.tipping_points[0] else None)
+    ax4.set_ylabel('Степень замыкания')
+    ax4.set_title('Критические переходы (TippingPoints)')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+    
+    # 5. Дисперсия убеждений (информационная энтропия)
+    ax5 = axes[2, 0]
+    var_theism = [h['var_theism'] for h in system.history]
+    var_ritual = [h['var_ritual'] for h in system.history]
+    ax5.plot(steps, var_theism, 'b-', alpha=0.7, label='Дисперсия теизма')
+    ax5.plot(steps, var_ritual, 'r-', alpha=0.7, label='Дисперсия ритуализма')
+    ax5.set_xlabel('Шаги (поколения)')
+    ax5.set_ylabel('Дисперсия')
+    ax5.set_title('Информационная неопределенность')
+    ax5.legend()
+    ax5.grid(True, alpha=0.3)
+    
+    # 6. Фазовый портрет
+    ax6 = axes[2, 1]
+    beliefs = np.array([a.beliefs for a in system.agents])
+    scatter = ax6.scatter(beliefs[:, 0], beliefs[:, 1], 
+                         c=levels[-1] if levels[-1] >= 0 else 0, 
+                         cmap='viridis', alpha=0.6, s=15)
+    ax6.set_xlabel('Теизм (анимизм→монотеизм)')
+    ax6.set_ylabel('Ритуализм')
+    ax6.set_title('Финальное распределение убеждений')
+    ax6.grid(True, alpha=0.3)
+    ax6.set_xlim(0, 1)
+    ax6.set_ylim(0, 1)
+    
+    plt.tight_layout()
+    plt.show()
+
+# ========== ЗАПУСК СИМУЛЯЦИИ ==========
+def main():
+    """Основная функция запуска"""
+    print("="*60)
+    print("UAF-АНАЛИЗ: ЭВОЛЮЦИЯ КУЛЬТУРЫ И РЕЛИГИИ")
+    print("="*60)
+    print(f"Параметры модели:")
+    print(f"  Агентов: {N_AGENTS}")
+    print(f"  Поколений: {N_STEPS}")
+    print(f"  Порог замыкания: {CLOSURE_THRESHOLD}")
+    print(f"  Вероятность экспериментатора: {EXPERIMENTER_PROB}")
+    print("-"*60)
+    
+    # Инициализация и запуск
+    system = CultureReligionSystem(N_AGENTS)
+    print("Инициализация системы...")
+    print(f"Начальный уровень: L{system.get_current_level()}")
+    print(f"Начальная степень замыкания: {system.calculate_closure_degree():.3f}")
+    
+    print("\nЗапуск эволюции...")
+    system.run()
+    
+    print("\n" + "="*60)
+    print("РЕЗУЛЬТАТЫ:")
+    print(f"Финальный уровень: L{system.get_current_level()}")
+    print(f"Финальная степень замыкания: {system.history[-1]['closure']:.3f}")
+    print(f"Количество TippingPoints: {len(system.tipping_points)}")
+    if system.tipping_points:
+        print(f"Шаги TippingPoints: {system.tipping_points}")
+    print("="*60)
+    
+    # Визуализация
+    plot_results(system)
+    
+    return system
+
+# ========== ИНСТРУКЦИЯ ЗАПУСКА ==========
+"""
+ИНСТРУКЦИЯ ДЛЯ COLAB:
+
+1. Скопируйте весь код в ячейку Colab
+2. Убедитесь, что установлены библиотеки:
+   !pip install numpy matplotlib
+3. Запустите ячейку (Ctrl+Enter или Runtime -> Run all)
+4. Графики отобразятся автоматически
+
+ПАРАМЕТРЫ ДЛЯ ЭКСПЕРИМЕНТОВ:
+- N_AGENTS: количество носителей культуры (больше = сложнее)
+- N_STEPS: время эволюции (больше = больше переходов)
+- CLOSURE_THRESHOLD: порог для TippingPoint (0.5-0.8)
+- MUTATION_RATE: скорость появления новых идей
+- INTERACTION_RATE: интенсивность культурного обмена
+- EXPERIMENTER_PROB: активность "реформаторов"
+
+ОЖИДАЕМЫЕ РЕЗУЛЬТАТЫ:
+1. График 1: движение средних убеждений к монотеизму/сложному ритуализму
+2. График 2: рост closure_degree с резкими скачками (TippingPoints)
+3. График 3: переходы между уровнями L0→L1→L2→L3
+4. График 4: моменты критических переходов
+5. График 5: снижение дисперсии (консолидация культуры)
+6. График 6: кластеризация в пространстве убеждений
+"""
+
+# Запуск при прямом выполнении скрипта
+if __name__ == "__main__":
+    system = main()
