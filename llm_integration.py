@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 
+
 # ============================================================
 # LLM BACKENDS
 # ============================================================
@@ -19,20 +20,26 @@ class LLMResponse:
 
 
 class MockLLM:
-    FACTS = {
-        "столица франции": ("Париж", "Лион"),
-        "столица японии": ("Токио", "Осака"),
-        "столица австралии": ("Канберра", "Сидней"),
-        "столица бразилии": ("Бразилиа", "Рио-де-Жанейро"),
-        "формула воды": ("H2O", "H3O"),
-        "год высадки на луну": ("1969", "1967"),
-        "автор война и мир": ("Лев Толстой", "Достоевский"),
-        "число пи": ("3.14159", "3.15"),
-        "скорость света": ("299792458 м/с", "300000001 м/с"),
-        "столица германии": ("Берлин", "Мюнхен"),
+    """Улучшенный MockLLM v3 — 2026 edition"""
+    
+    KNOWLEDGE_BASE = {
+        "столица франции": ("Париж", "Париж — столица Франции."),
+        "столица японии": ("Токио", "Токио — столица Японии."),
+        "столица австралии": ("Канберра", "Канберра — столица Австралии."),
+        "столица бразилии": ("Бразилиа", "Бразилиа — столица Бразилии."),
+        "столица германии": ("Берлин", "Берлин — столица Германии."),
+        "столица россии": ("Москва", "Москва — столица России."),
+        "формула воды": ("H2O", "Химическая формула воды — H₂O."),
+        "год высадки на луну": ("1969", "Аполлон-11 высадился на Луну в 1969 году."),
+        "автор война и мир": ("Лев Толстой", "«Войну и мир» написал Лев Николаевич Толстой."),
+        "кто написал война и мир": ("Лев Толстой", "Автор романа — Лев Толстой."),
+        "число пи": ("3.14159", "Число π приблизительно равно 3.14159."),
+        "скорость света": ("299792458", "Скорость света в вакууме ≈ 299792458 м/с."),
+        "самая высокая гора": ("Эверест", "Самая высокая гора Земли — Эверест (8848 м)."),
+        "президент сша 2024": ("Дональд Трамп", "На выборах 2024 года победил Дональд Трамп."),
     }
 
-    def __init__(self, hallucination_rate: float = 0.2, name: str = "mock-llm"):
+    def __init__(self, hallucination_rate: float = 0.22, name: str = "mock-llm-v3"):
         self.name = name
         self.hallucination_rate = hallucination_rate
         self._step = 0
@@ -43,30 +50,59 @@ class MockLLM:
         for _ in range(n):
             answer, conf = self._answer(prompt, mode)
             results.append(LLMResponse(
-                text=answer, confidence=conf,
-                latency=random.uniform(0.05, 0.3),
-                model=self.name, mode=mode
+                text=answer,
+                confidence=conf,
+                latency=random.uniform(0.08, 0.45),
+                model=self.name,
+                mode=mode
             ))
         return results
 
     def _answer(self, prompt: str, mode: str) -> Tuple[str, float]:
-        p = prompt.lower()
-        for key, (correct, wrong) in self.FACTS.items():
-            if key in p:
-                rate = self.hallucination_rate
-                if mode == "conservative": rate *= 0.3
-                elif mode == "synthesis": rate *= 0.5
-                if random.random() < rate:
-                    return wrong, 0.72
+        p = prompt.lower().strip()
+        
+        # Улучшенный поиск
+        best_key = None
+        best_score = 0
+        for key in self.KNOWLEDGE_BASE:
+            score = sum(1 for word in key.split() if word in p)
+            if score > best_score:
+                best_score = score
+                best_key = key
+
+        if best_key and best_score > 0:
+            correct, explanation = self.KNOWLEDGE_BASE[best_key]
+            rate = self.hallucination_rate
+
+            if mode == "conservative":
+                rate *= 0.25
+            elif mode == "synthesis":
+                rate *= 0.45
+
+            if random.random() < rate:
+                # Галлюцинация
+                wrongs = ["Не уверен", "Примерно 2020", "Лондон", "H3O", "Достоевский", "Мюнхен", "Около 300000000"]
+                return random.choice(wrongs), random.uniform(0.45, 0.68)
+            else:
+                # Правильный ответ
+                if mode == "synthesis":
+                    return f"{correct}. {explanation}", random.uniform(0.88, 0.97)
+                elif mode == "conservative":
+                    return correct, random.uniform(0.85, 0.94)
                 else:
-                    return correct, 0.91
+                    return correct, random.uniform(0.78, 0.91)
+
+        # Если факт не найден
         if mode == "conservative":
-            return "Не знаю точного ответа.", 0.30
-        return f"Ответ: {random.randint(100, 999)}", 0.65
+            return "Я не обладаю достаточной уверенностью для точного ответа.", 0.38
+        elif mode == "synthesis":
+            return "На основе доступных данных точного ответа нет. Рекомендую проверить авторитетный источник.", 0.62
+        else:
+            return f"Примерный ответ: {random.randint(1000, 9999)}", 0.55
 
 
 # ============================================================
-# HALLUCINATION GUARD + TRUST + DOUBT SYSTEM (Experiment 020)
+# HALLUCINATION GUARD + TRUST + DOUBT SYSTEM
 # ============================================================
 @dataclass
 class HallucinationReport:
@@ -86,10 +122,7 @@ class LLMTrustSystem:
 
     def update(self, confidence: float, correct: bool) -> float:
         baseline = 0.1
-        if correct:
-            pg = math.log(max(confidence, baseline) / baseline)
-        else:
-            pg = -2.0 * confidence
+        pg = math.log(max(confidence, baseline) / baseline) if correct else -2.0 * confidence
         self.cumulative_pg = (1 - self.beta) * self.cumulative_pg + self.beta * pg
         self.trust = 1.0 / (1.0 + math.exp(-self.cumulative_pg))
         self.history.append({"confidence": confidence, "correct": correct, "trust": self.trust})
@@ -100,8 +133,8 @@ class UAFLLMShell:
     MODES = ("llm_raw", "conservative", "synthesis")
     PROMPTS = {
         "llm_raw": "",
-        "conservative": "Отвечай только если уверен на 90%+. Иначе: 'не знаю'. Вопрос: ",
-        "synthesis": "Шаг 1: что знаю точно? Шаг 2: какие есть неопределённости? Шаг 3: ответ. Вопрос: ",
+        "conservative": "Отвечай только если уверен на 90%+. Иначе скажи 'не знаю'. Вопрос: ",
+        "synthesis": "Шаг 1: Что я знаю точно? Шаг 2: Какие есть неопределённости? Шаг 3: Синтез. Вопрос: ",
     }
 
     def __init__(self, llm, fail_threshold: int = 4, n_consistency_samples: int = 3):
@@ -109,7 +142,7 @@ class UAFLLMShell:
         self.guard = HallucinationGuard(n_samples=n_consistency_samples)
         self.trust = LLMTrustSystem()
         
-        # === Experiment 020: Doubt + Aufhebung ===
+        # Doubt + Aufhebung system
         self.doubt: float = 0.3
         self.residuum: float = 0.2
         self.entropy: float = 1.0
@@ -134,7 +167,7 @@ class UAFLLMShell:
         if hall_report.detected:
             self.n_hallucinations_detected += 1
 
-        # Correctness
+        # Correctness check
         correct = None
         if ground_truth:
             gt = ground_truth.lower().strip()
@@ -143,25 +176,22 @@ class UAFLLMShell:
             if correct:
                 self.n_correct += 1
 
-        # Surprise для Doubt system
-        surprise = 1.0 - resp.confidence if correct is False else (1.0 - resp.confidence) * 0.3
-        
-        # === UAF Doubt Dynamics (Experiment 020) ===
-        self.residuum = max(0.0, min(1.5, self.residuum * 0.96 + surprise * 0.12))
-        self.doubt = 0.15 + self.residuum * 1.6
+        # Doubt dynamics
+        surprise = 1.0 - resp.confidence if correct is False else (1.0 - resp.confidence) * 0.35
+        self.residuum = max(0.0, min(1.6, self.residuum * 0.94 + surprise * 0.18))
+        self.doubt = 0.18 + self.residuum * 1.65
         self.entropy = 0.5 + self.doubt * 1.1
         self.temperature = 0.6 + self.residuum * 0.9
 
         # Aufhebung
         aufhebung_fired = False
-        if self.doubt > 1.35 and self.n_questions > 30:
+        if self.doubt > 1.4 and self.n_questions > 15:
             self.aufhebung_count += 1
             aufhebung_fired = True
-            self.doubt = max(0.25, self.doubt * 0.42)
-            self.residuum *= 0.35
+            self.doubt = max(0.25, self.doubt * 0.45)
+            self.residuum *= 0.4
             self._aufhebung()
 
-        # Trust update
         if correct is not None:
             self.trust.update(resp.confidence, correct)
 
@@ -170,7 +200,7 @@ class UAFLLMShell:
         return {
             "question": question,
             "answer": final_answer,
-            "confidence": resp.confidence,
+            "confidence": round(resp.confidence, 4),
             "trust": round(self.trust.trust, 4),
             "doubt": round(self.doubt, 4),
             "residuum": round(self.residuum, 4),
@@ -197,7 +227,7 @@ class UAFLLMShell:
 
 
 # ============================================================
-# HALLUCINATION GUARD (оставлен почти без изменений)
+# HALLUCINATION GUARD
 # ============================================================
 class HallucinationGuard:
     def __init__(self, n_samples: int = 3, threshold: float = 0.45):
@@ -209,56 +239,61 @@ class HallucinationGuard:
         texts = [r.text.lower() for r in responses]
         word_sets = [set(t.split()) for t in texts]
         
-        pairs = []
-        for i in range(len(word_sets)):
-            for j in range(i+1, len(word_sets)):
-                inter = len(word_sets[i] & word_sets[j])
-                union = len(word_sets[i] | word_sets[j])
-                pairs.append(inter / max(union, 1))
+        intersections = [len(word_sets[0] & s) for s in word_sets[1:]]
+        consistency = sum(intersections) / (len(intersections) * len(word_sets[0] or [1]))
         
-        consistency = sum(pairs) / max(len(pairs), 1)
-        severity = max(0.0, 1.0 - consistency)
-        detected = severity > self.threshold
-        
-        corrected = texts[0] if detected else None
+        detected = consistency < self.threshold
+        severity = 1.0 - consistency
         
         return HallucinationReport(
             detected=detected,
-            consistency=consistency,
-            severity=severity,
+            consistency=round(consistency, 4),
+            severity=round(severity, 4),
             mode=mode,
-            corrected=corrected
+            corrected=None
         )
 
 
 # ============================================================
-# MAIN + TESTS
+# EXPERIMENT
 # ============================================================
-TEST_SUITE = [
-    {"q": "Какая столица Франции?", "a": "Париж"},
-    {"q": "В каком году высадились на Луну?", "a": "1969"},
-    {"q": "Какая формула воды?", "a": "H2O"},
-    {"q": "Кто написал Войну и мир?", "a": "Толстой"},
-]
-
-def run_experiment():
-    llm = MockLLM(hallucination_rate=0.35)
-    shell = UAFLLMShell(llm, fail_threshold=4)
+def run_experiment(n_questions=20, hallucination_rate=0.22):
+    print("=== UAF LLM Shell v2.1 + MockLLM v3 ===\n")
     
-    print("=== UAF LLM with Doubt + Aufhebung (Exp 020) ===\n")
-    for tc in TEST_SUITE * 5:  # 20 вопросов
-        result = shell.ask(tc["q"], tc["a"])
-        print(f"Q: {tc['q'][:45]:<45} | Ans: {result['answer'][:25]:<25} | "
+    mock = MockLLM(hallucination_rate=hallucination_rate)
+    shell = UAFLLMShell(mock, fail_threshold=5)
+    
+    test_cases = [
+        ("Какая столица Франции?", "Париж"),
+        ("В каком году высадились на Луну?", "1969"),
+        ("Какая формула воды?", "H2O"),
+        ("Кто написал 'Войну и мир'?", "Лев Толстой"),
+        ("Чему примерно равно число пи?", "3.14159"),
+        ("Какая столица Японии?", "Токио"),
+        ("Скорость света в вакууме?", "299792458"),
+        ("Какая столица Германии?", "Берлин"),
+    ]
+    
+    for i in range(n_questions):
+        q, gt = random.choice(test_cases)
+        result = shell.ask(q, gt)
+        
+        print(f"Q: {result['question']:<45} | Ans: {result['answer']:<30} | "
               f"Trust: {result['trust']:.3f} | Doubt: {result['doubt']:.3f} | "
               f"Mode: {result['mode']:<12} | Auf: {result['aufhebung_fired']}")
-
-    m = shell.metrics()
+        
+        time.sleep(0.03)
+    
     print("\n" + "="*80)
     print("FINAL METRICS:")
-    for k, v in m.items():
-        print(f"  {k:20}: {v}")
-    print("="*80)
+    for k, v in shell.metrics().items():
+        print(f"  {k}: {v}")
 
 
 if __name__ == "__main__":
-    run_experiment()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--questions", type=int, default=25)
+    parser.add_argument("--hall-rate", type=float, default=0.22)
+    args = parser.parse_args()
+    
+    run_experiment(n_questions=args.questions, hallucination_rate=args.hall_rate)
