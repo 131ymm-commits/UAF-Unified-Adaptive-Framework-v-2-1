@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: "UAF — Unified Adaptive Framework v2.0"
+message: "If you use UAF, please cite it using this metadata."
+authors:
+  - name: "131ym"
+date-released: "2026-06-03"
+version: "2.0.0"
+repository-code: "https://github.com/131ymm-commits/UAF-Unified-Adaptive-Framework"
+license: MIT
+abstract: >
+  UAF is a research framework proposing that stable systems at all scales
+  persist by minimizing variational free energy. It provides a formal
+  ontology connecting physics, biology, cognition, social systems, and
+  the noosphere through the invariant operation of prediction-error minimization.
